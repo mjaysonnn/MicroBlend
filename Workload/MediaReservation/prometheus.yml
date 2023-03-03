@@ -1,0 +1,91 @@
+scrape_configs:
+  - job_name: unique-id-service
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - 'mjmediareservation-unique-id-service-1:9435'
+          - 'mjmediareservation-unique-id-service-2:9435'
+          - 'mjmediareservation-unique-id-service-3:9435'
+          - 'mjmediareservation-unique-id-service-4:9435'
+          - 'mjmediareservation-unique-id-service-5:9435'
+
+  - job_name: text-service
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - 'mjmediareservation-text-service-1:9451'
+          - 'mjmediareservation-text-service-2:9451'
+          - 'mjmediareservation-text-service-3:9451'
+          - 'mjmediareservation-text-service-4:9451'
+          - 'mjmediareservation-text-service-5:9451'
+
+  - job_name: user-service
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - 'mjmediareservation-user-service-1:9467'
+          - 'mjmediareservation-user-service-2:9467'
+          - 'mjmediareservation-user-service-3:9467'
+          - 'mjmediareservation-user-service-4:9467'
+          - 'mjmediareservation-user-service-5:9467'
+  - job_name: rating-service
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - "mjmediareservation-rating-service-1:9483"
+          - "mjmediareservation-rating-service-2:9483"
+          - "mjmediareservation-rating-service-3:9483"
+          - "mjmediareservation-rating-service-4:9483"
+          - "mjmediareservation-rating-service-5:9483"
+  - job_name: movie-id-service
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - "mjmediareservation-movie-id-service-1:9499"
+          - "mjmediareservation-movie-id-service-2:9499"
+          - "mjmediareservation-movie-id-service-3:9499"
+          - "mjmediareservation-movie-id-service-4:9499"
+          - "mjmediareservation-movie-id-service-5:9499"
+
+
+  - job_name: review-storage-service
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - "mjmediareservation-review-storage-service-1:9515"
+          - "mjmediareservation-review-storage-service-2:9515"
+          - "mjmediareservation-review-storage-service-3:9515"
+          - "mjmediareservation-review-storage-service-4:9515"
+          - "mjmediareservation-review-storage-service-5:9515"
+
+  - job_name: movie-review-service
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - "mjmediareservation-movie-review-service-1:9531"
+          - "mjmediareservation-movie-review-service-2:9531"
+          - "mjmediareservation-movie-review-service-3:9531"
+          - "mjmediareservation-movie-review-service-4:9531"
+          - "mjmediareservation-movie-review-service-5:9531"
+
+
+  - job_name: user-review-service
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - "mjmediareservation-user-review-service-1:9547"
+          - "mjmediareservation-user-review-service-2:9547"
+          - "mjmediareservation-user-review-service-3:9547"
+          - "mjmediareservation-user-review-service-4:9547"
+          - "mjmediareservation-user-review-service-5:9547"
+
+
+  - job_name: compose-review-service
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - "mjmediareservation-compose-review-service-1:9563"
+          - "mjmediareservation-compose-review-service-2:9563"
+          - "mjmediareservation-compose-review-service-3:9563"
+          - "mjmediareservation-compose-review-service-4:9563"
+          - "mjmediareservation-compose-review-service-5:9563"
