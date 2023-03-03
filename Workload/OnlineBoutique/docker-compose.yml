@@ -1,0 +1,181 @@
+version: "3.9"
+services:
+  nginx: # Internal network for the services
+    image: nginx:latest
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - unique-id-service
+    ports:
+      #      - "9435-9446:9435-9446"
+      - "5001-5011:5001-5011"
+
+#  jaeger-agent: # Monitoring Tools for Span Analysis
+#    image: "jaegertracing/all-in-one:latest"
+#    ports:
+#      - "16686:16686"
+#      - "4317-4318:4317-4318"
+#    restart: always
+#    command: [ "--log-level=error" ]
+#    environment:
+#      - COLLECTOR_OTLP_ENABLED=true
+
+  product-catalog-service:
+    image: smj8612/google_online_boutique:latest
+    privileged: true # needed for ebpf_exporter
+    ports:
+      - "9435-9450:9435" # for ebpf_exporter
+    volumes:
+      - "/sys:/sys:ro"
+      - "/usr/src:/usr/src:ro"
+      - "/lib/modules:/lib/modules:ro"
+    expose: # For Nginx
+      - "5001" # needed for microservice
+    deploy: # For Nginx
+      replicas: 5
+    environment:
+      - OTEL_SERVICE_NAME=ProductCatalogService # The name of the service for OpenTelemetry
+    command:
+      - /bin/sh
+      - -c
+      - |
+        uvicorn product_catalog_service:app --log-level critical --host 0.0.0.0 --port 5001 &
+        cd ../../
+        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9435"
+        do
+          sleep 0.01
+        done
+
+
+  currency-service:
+    image: smj8612/google_online_boutique:latest
+    privileged: true # needed for ebpf_exporter
+    volumes:
+      - '/sys:/sys:ro'
+      - '/usr/src:/usr/src:ro'
+      - '/lib/modules:/lib/modules:ro'
+    expose:
+      - "5002" # will distribute by nginx
+    ports:
+      - "9451-9466:9451" # for ebpf_exporter
+    deploy:
+      replicas: 5
+    environment:
+      - OTEL_SERVICE_NAME=CurrencyService # The name of the service for OpenTelemetry
+    command:
+      - /bin/sh
+      - -c
+      - |
+        uvicorn currency_service:app --log-level critical --host 0.0.0.0 --port 5002 &
+        cd ../../
+        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9451"
+        do
+          sleep 0.01
+        done
+
+  payment-service:
+    image: smj8612/google_online_boutique:latest
+    privileged: true # needed for ebpf_exporter
+    volumes:
+      - '/sys:/sys:ro'
+      - '/usr/src:/usr/src:ro'
+      - '/lib/modules:/lib/modules:ro'
+    expose:
+      - "5003" # needed for microservice
+    ports:
+      - "9467-9482:9467"
+    deploy:
+      replicas: 5
+    environment:
+      - OTEL_SERVICE_NAME=PaymentService # The name of the service for OpenTelemetry
+    command:
+      - /bin/sh
+      - -c
+      - |
+        uvicorn payment_service:app --log-level critical  --host 0.0.0.0 --port 5003 &
+        cd ../../
+        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9467"
+        do
+          sleep 0.01
+        done
+
+  shipping-service:
+    image: smj8612/google_online_boutique:latest
+    privileged: true # needed for ebpf_exporter
+    volumes:
+      - '/sys:/sys:ro'
+      - '/usr/src:/usr/src:ro'
+      - '/lib/modules:/lib/modules:ro'
+    expose:
+      - "5004" # needed for microservice
+    ports:
+      - "9483-9498:9483"
+    deploy:
+      replicas: 5
+    environment:
+      - OTEL_SERVICE_NAME=ShippingService
+    command:
+      - /bin/sh
+      - -c
+      - |
+        uvicorn shipping_service:app --log-level critical  --host 0.0.0.0 --port 5004 &
+        cd ../../
+        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9483"
+        do
+          sleep 0.01
+        done
+
+  email-service:
+    image: smj8612/google_online_boutique:latest
+    privileged: true # needed for ebpf_exporter
+    volumes:
+      - '/sys:/sys:ro'
+      - '/usr/src:/usr/src:ro'
+      - '/lib/modules:/lib/modules:ro'
+    expose:
+      - "5005" # needed for microservice
+    ports:
+      - "9499-9514:9499"
+    deploy:
+      replicas: 5
+    environment:
+      - OTEL_SERVICE_NAME=EmailService # The name of the service for OpenTelemetry
+    command:
+      - /bin/sh
+      - -c
+      - |
+        uvicorn email_service:app --log-level critical  --host 0.0.0.0 --port 5005 &
+        cd ../../
+        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9499"
+        do
+          sleep 0.01
+        done
+
+  checkout-service:
+    image: smj8612/google_online_boutique:latest
+    privileged: true # needed for ebpf_exporter
+    volumes:
+      - '/sys:/sys:ro'
+      - '/usr/src:/usr/src:ro'
+      - '/lib/modules:/lib/modules:ro'
+    expose:
+      - "5008" # needed for microservice
+    ports:
+      - "9547-9562:9547"
+    deploy:
+      replicas: 5
+    depends_on:
+      user-review-mongodb:
+        condition: service_started
+    environment:
+      - OTEL_SERVICE_NAME=CheckoutService # The name of the service for OpenTelemetry
+    command:
+      - /bin/sh
+      - -c
+      - |
+        uvicorn checkout_service:app --log-level critical  --host 0.0.0.0 --port 5008 &
+        cd ../../
+        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9547"
+        do
+          sleep 0.01
+        done
