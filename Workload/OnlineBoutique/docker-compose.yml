@@ -10,15 +10,16 @@ services:
       #      - "9435-9446:9435-9446"
       - "5001-5011:5001-5011"
 
-#  jaeger-agent: # Monitoring Tools for Span Analysis
-#    image: "jaegertracing/all-in-one:latest"
-#    ports:
-#      - "16686:16686"
-#      - "4317-4318:4317-4318"
-#    restart: always
-#    command: [ "--log-level=error" ]
-#    environment:
-#      - COLLECTOR_OTLP_ENABLED=true
+  prometheus: # Monitoring Tools for collecting metrics and logs
+    image: "prom/prometheus:latest"
+    container_name: prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    volumes:
+      - "./prometheus.yml:/etc/prometheus/prometheus.yml:ro"
 
   product-catalog-service:
     image: smj8612/google_online_boutique:latest
@@ -32,7 +33,7 @@ services:
     expose: # For Nginx
       - "5001" # needed for microservice
     deploy: # For Nginx
-      replicas: 5
+      replicas: 1
     environment:
       - OTEL_SERVICE_NAME=ProductCatalogService # The name of the service for OpenTelemetry
     command:
@@ -59,7 +60,7 @@ services:
     ports:
       - "9451-9466:9451" # for ebpf_exporter
     deploy:
-      replicas: 5
+      replicas: 1
     environment:
       - OTEL_SERVICE_NAME=CurrencyService # The name of the service for OpenTelemetry
     command:
@@ -85,7 +86,7 @@ services:
     ports:
       - "9467-9482:9467"
     deploy:
-      replicas: 5
+      replicas: 1
     environment:
       - OTEL_SERVICE_NAME=PaymentService # The name of the service for OpenTelemetry
     command:
@@ -111,7 +112,7 @@ services:
     ports:
       - "9483-9498:9483"
     deploy:
-      replicas: 5
+      replicas: 1
     environment:
       - OTEL_SERVICE_NAME=ShippingService
     command:
@@ -137,7 +138,7 @@ services:
     ports:
       - "9499-9514:9499"
     deploy:
-      replicas: 5
+      replicas: 1
     environment:
       - OTEL_SERVICE_NAME=EmailService # The name of the service for OpenTelemetry
     command:
@@ -163,7 +164,7 @@ services:
     ports:
       - "9547-9562:9547"
     deploy:
-      replicas: 5
+      replicas: 1
     depends_on:
       user-review-mongodb:
         condition: service_started
