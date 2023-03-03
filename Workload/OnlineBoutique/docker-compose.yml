@@ -33,7 +33,7 @@ services:
     expose: # For Nginx
       - "5001" # needed for microservice
     deploy: # For Nginx
-      replicas: 1
+      replicas: 1 # default is 5
     environment:
       - OTEL_SERVICE_NAME=ProductCatalogService # The name of the service for OpenTelemetry
     command:
