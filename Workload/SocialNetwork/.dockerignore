@@ -1,0 +1,8 @@
+Dockerfile
+.dockerignore
+docker-compose.yml
+get_metrics/*
+locust_generator/*
+!/app/locust_generator/logs/run_locust.log
+/app/locust_generator/logs/run_locust_unique_id_service.log
+!/social_network_replicas/heatmap_for_latency/

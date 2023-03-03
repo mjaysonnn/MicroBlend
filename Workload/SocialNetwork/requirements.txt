@@ -1,0 +1,11 @@
+fastapi>=0.68.0,<0.69.0
+pydantic>=1.8.0,<2.0.0
+uvicorn>=0.15.0,<0.16.0
+colorlog==6.6.0
+thrift==0.15.0
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http
+requests
+pymongo~=4.0.2
+dataclasses
