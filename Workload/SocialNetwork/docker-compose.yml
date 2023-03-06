@@ -131,11 +131,6 @@ services:
       - -c
       - |
         uvicorn unique_id_service:app --log-level critical --host 0.0.0.0 --port 5001 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9435"
-        do
-          sleep 0.01
-        done
 
   media-service:
     image: smj8612/social_network_ebpf_microservices_replicas:latest
@@ -161,11 +156,7 @@ services:
       - -c
       - |
         uvicorn media_service:app --log-level critical --host 0.0.0.0 --port 5002 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9451"
-        do
-          sleep 0.01
-        done
+
 
   user-service:
     image: smj8612/social_network_ebpf_microservices_replicas:latest
@@ -191,11 +182,7 @@ services:
         - -c
         - |
           uvicorn user_service:app --log-level critical  --host 0.0.0.0 --port 5003 &
-          cd ../../
-          while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9467"
-          do
-            sleep 0.01
-          done
+
 
   url-shorten-service:
     image: smj8612/social_network_ebpf_microservices_replicas:latest
@@ -221,11 +208,7 @@ services:
         - -c
         - |
           uvicorn url_shorten_service:app --log-level critical  --host 0.0.0.0 --port 5004 &
-          cd ../../
-          while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9483"
-          do
-            sleep 0.01
-          done
+
 
   user-mention-service:
     image: smj8612/social_network_ebpf_microservices_replicas:latest
@@ -251,11 +234,7 @@ services:
       - -c
       - |
         uvicorn user_mention_service:app --log-level critical  --host 0.0.0.0 --port 5005 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9499"
-        do
-          sleep 0.01
-        done
+
 
 
   text-service:
@@ -282,11 +261,7 @@ services:
       - -c
       - |
         uvicorn text_service:app --log-level critical  --host 0.0.0.0 --port 5006 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9515"
-        do
-          sleep 0.01
-        done
+
 
   compose-post-service:
     image: smj8612/social_network_ebpf_microservices_replicas:latest
@@ -312,11 +287,7 @@ services:
       - -c
       - |
         uvicorn compose_post_service:app --log-level critical  --host 0.0.0.0 --port 5007 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9531"
-        do
-          sleep 0.01
-        done
+
 
 
   post-storage-service:
@@ -345,11 +316,7 @@ services:
       - -c
       - |
         uvicorn post_storage_service:app --log-level critical  --host 0.0.0.0 --port 5008 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9547"
-        do
-          sleep 0.01
-        done
+
 
   user-timeline-service:
     image: smj8612/social_network_ebpf_microservices_replicas:latest
@@ -377,11 +344,7 @@ services:
       - -c
       - |
         uvicorn user_timeline_service:app --log-level critical  --host 0.0.0.0 --port 5009 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9563"
-        do
-          sleep 0.01
-        done
+
 
   home-timeline-service:
     image: smj8612/social_network_ebpf_microservices_replicas:latest
@@ -407,11 +370,7 @@ services:
       - -c
       - |
         uvicorn home_timeline_service:app --log-level critical --host 0.0.0.0 --port 5010 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9579"
-        do
-          sleep 0.01
-        done
+
 
 
   social-graph-service:
@@ -440,11 +399,7 @@ services:
       - -c
       - |
         uvicorn social_graph_service:app --log-level critical --host 0.0.0.0 --port 5011 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9595"
-        do
-          sleep 0.01
-        done
+
 
   # MongoDBs
   url-shorten-mongodb:
