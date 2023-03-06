@@ -46,11 +46,7 @@ services:
       - -c
       - |
         uvicorn unique_id_service:app --log-level critical --host 0.0.0.0 --port 5001 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9435"
-        do
-          sleep 0.01
-        done
+
 
 
   text-service:
@@ -73,11 +69,7 @@ services:
       - -c
       - |
         uvicorn upload_text_service:app --log-level critical --host 0.0.0.0 --port 5002 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9451"
-        do
-          sleep 0.01
-        done
+
 
   user-service:
     image: smj8612/media_reservation_mj:latest
@@ -99,11 +91,6 @@ services:
       - -c
       - |
         uvicorn user_service:app --log-level critical  --host 0.0.0.0 --port 5003 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9467"
-        do
-          sleep 0.01
-        done
 
   user-storage-mongodb:
     image: mongo
@@ -133,11 +120,7 @@ services:
       - -c
       - |
         uvicorn rating_service:app --log-level critical  --host 0.0.0.0 --port 5004 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9483"
-        do
-          sleep 0.01
-        done
+
 
   rating-mongodb:
     image: mongo
@@ -167,11 +150,7 @@ services:
       - -c
       - |
         uvicorn movie_id_service:app --log-level critical  --host 0.0.0.0 --port 5005 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9499"
-        do
-          sleep 0.01
-        done
+
   
 
   movie-id-mongodb:
@@ -201,11 +180,7 @@ services:
       - -c
       - |
         uvicorn review_storage_service:app --log-level critical  --host 0.0.0.0 --port 5006 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9515"
-        do
-          sleep 0.01
-        done    
+
 
   review-storage-mongodb:
     image: mongo
@@ -234,11 +209,7 @@ services:
       - -c
       - |
         uvicorn movie_review_service:app --log-level critical  --host 0.0.0.0 --port 5007 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9531"
-        do
-          sleep 0.01
-        done
+
   
 
   movie-review-mongodb:
@@ -272,11 +243,6 @@ services:
       - -c
       - |
         uvicorn user_review_service:app --log-level critical  --host 0.0.0.0 --port 5008 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9547"
-        do
-          sleep 0.01
-        done
 
   user-review-mongodb:
     image: mongo
@@ -305,10 +271,6 @@ services:
       - -c
       - |
         uvicorn compose_review:app --log-level critical  --host 0.0.0.0 --port 5009 &
-        cd ../../
-        while ! ~/go/bin/ebpf_exporter --config.file=go/ebpf_exporter/examples/runqlat.yaml --web.listen-address=":9563"
-        do
-          sleep 0.01
-        done
+
         
 
