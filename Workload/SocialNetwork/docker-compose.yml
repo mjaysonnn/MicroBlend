@@ -1,12 +1,12 @@
 version: "3.9"
 services:
 
-  nginx: # Internal network for the services
+  nginx:
     image: nginx:latest
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    container_name: nginx
     depends_on:
-      - nodejs
       - unique-id-service
       - media-service
       - user-service
@@ -25,39 +25,9 @@ services:
       - home-timeline-service
       - social-graph-service
     ports:
-#      - "9435-9446:9435-9446"
       - "5001-5011:5001-5011"
 
-  jaeger-agent: # Monitoring Tools for Span Analysis
-    image: "jaegertracing/all-in-one:latest"
-    ports:
-      - "16686:16686"
-      - "4317-4318:4317-4318"
-    restart: always
-    command: ["--log-level=error"]
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-#    depends_on:
-#      - empty-log-service
-#      - unique-id-service
-#      - media-service
-#      - user-service
-#      - url-shorten-service
-#      - user-mention-service
-#      - text-service
-#      - url-shorten-mongodb
-#      - social-graph-mongodb
-#      - post-storage-mongodb
-#      - home-timeline-mongodb
-#      - user-timeline-mongodb
-#      - init-social-graph
-#      - compose-post-service
-#      - post-storage-service
-#      - user-timeline-service
-#      - home-timeline-service
-#      - social-graph-service
-
-  prometheus: # Monitoring Tools for collecting metrics and logs
+  prometheus:
     image: "prom/prometheus:latest"
     container_name: prometheus
     restart: always
@@ -67,347 +37,157 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
     volumes:
       - "./prometheus.yml:/etc/prometheus/prometheus.yml:ro"
-    depends_on:
-      - cadvisor
-      - jaeger-agent
 
-  cadvisor: # Monitor the container
-    image: "gcr.io/cadvisor/cadvisor:latest"
-    container_name: cadvisor
-    ports:
-      - "8080:8080"
-    privileged: true
-    volumes:
-      - "/:/rootfs:ro"
-      - "/var/run:/var/run:rw"
-      - "/sys:/sys:ro"
-      - "/var/lib/docker/:/var/lib/docker:ro"
-    depends_on:
-#      - empty-log-service
-      - unique-id-service
-      - media-service
-      - user-service
-      - url-shorten-service
-      - user-mention-service
-      - text-service
-      - url-shorten-mongodb
-      - social-graph-mongodb
-      - post-storage-mongodb
-      - home-timeline-mongodb
-      - user-timeline-mongodb
-      - init-social-graph
-      - compose-post-service
-      - post-storage-service
-      - user-timeline-service
-      - home-timeline-service
-      - social-graph-service
-    command:
-      - "-docker_only=true"
-      - "-housekeeping_interval=15s"
-      - "--disable_metrics=percpu,process,sched,tcp,udp,diskIO,disk"
 
   unique-id-service:
-    image: smj8612/social_network_ebpf_microservices_replicas:latest
-    privileged: true # needed for ebpf_exporter
-    hostname: "unique-id-service"
+    image: smj8612/social_network_mj:latest
+    container_name: unique-id-service
     expose:
-#      - "9435" # needed for ebpf_exporter
       - "5001" # needed for microservice
-    ports:
-      - "9435-9450:9435"
-    volumes:
-      - "/sys:/sys:ro"
-      - "/usr/src:/usr/src:ro"
-      - "/lib/modules:/lib/modules:ro"
-#    depends_on:
-#      jaeger-agent:
-#        condition: service_started
     deploy:
-        replicas: 1
-    environment:
-      - OTEL_SERVICE_NAME=UniqueIdService # The name of the service for OpenTelemetry
+      replicas: 1
     command:
       - /bin/sh
       - -c
-      - |
-        uvicorn unique_id_service:app --log-level critical --host 0.0.0.0 --port 5001 &
+      - uvicorn unique_id_service:app --log-level critical --host 0.0.0.0 --port 5001
+
 
   media-service:
-    image: smj8612/social_network_ebpf_microservices_replicas:latest
-    privileged: true # needed for ebpf_exporter
-    volumes:
-      - '/sys:/sys:ro'
-      - '/usr/src:/usr/src:ro'
-      - '/lib/modules:/lib/modules:ro'
+    image: smj8612/social_network_mj:latest
+    container_name: media-service
     expose:
-#      - "9436" # needed for ebpf_exporter
-      - "5002" # needed for microservice
-    ports:
-        - "9451-9466:9451"
-#    depends_on:
-#      jaeger-agent:
-#        condition: service_started
+      - "5002"
     deploy:
-        replicas: 1
-    environment:
-      - OTEL_SERVICE_NAME=MediaService # The name of the service for OpenTelemetry
+      replicas: 1
     command:
       - /bin/sh
       - -c
-      - |
-        uvicorn media_service:app --log-level critical --host 0.0.0.0 --port 5002 &
-
+      - uvicorn media_service:app --log-level critical --host 0.0.0.0 --port 5002
 
   user-service:
-    image: smj8612/social_network_ebpf_microservices_replicas:latest
-    privileged: true # needed for ebpf_exporter
-    volumes:
-        - '/sys:/sys:ro'
-        - '/usr/src:/usr/src:ro'
-        - '/lib/modules:/lib/modules:ro'
+    image: smj8612/social_network_mj:latest
+    container_name: user-service
     expose:
-#        - "9437" # needed for ebpf_exporter
-        - "5003" # needed for microservice
-    ports:
-        - "9467-9482:9467"
+      - "5003"
     deploy:
-        replicas: 1
-#    depends_on:
-#      jaeger-agent:
-#        condition: service_started
-    environment:
-        - OTEL_SERVICE_NAME=UserService # The name of the service for OpenTelemetry
-    command:
-        - /bin/sh
-        - -c
-        - |
-          uvicorn user_service:app --log-level critical  --host 0.0.0.0 --port 5003 &
-
-
-  url-shorten-service:
-    image: smj8612/social_network_ebpf_microservices_replicas:latest
-    privileged: true # needed for ebpf_exporter
-    volumes:
-        - '/sys:/sys:ro'
-        - '/usr/src:/usr/src:ro'
-        - '/lib/modules:/lib/modules:ro'
-    expose:
-#        - "9438" # needed for ebpf_exporter
-        - "5004" # needed for microservice
-    ports:
-      - "9483-9498:9483"
-    deploy:
-        replicas: 1
-#    depends_on:
-#      jaeger-agent:
-#        condition: service_started
-    environment:
-        - OTEL_SERVICE_NAME=UrlShortenService # The name of the service for OpenTelemetry
-    command:
-        - /bin/sh
-        - -c
-        - |
-          uvicorn url_shorten_service:app --log-level critical  --host 0.0.0.0 --port 5004 &
-
-
-  user-mention-service:
-    image: smj8612/social_network_ebpf_microservices_replicas:latest
-    privileged: true # needed for ebpf_exporter
-    volumes:
-      - '/sys:/sys:ro'
-      - '/usr/src:/usr/src:ro'
-      - '/lib/modules:/lib/modules:ro'
-    expose:
-#      - "9439" # needed for ebpf_exporter
-      - "5005" # needed for microservice
-    ports:
-      - "9499-9514:9499"
-    deploy:
-        replicas: 1
-#    depends_on:
-#      jaeger-agent:
-#        condition: service_started
-    environment:
-      - OTEL_SERVICE_NAME=UserMentionService # The name of the service for OpenTelemetry
+      replicas: 1
     command:
       - /bin/sh
       - -c
-      - |
-        uvicorn user_mention_service:app --log-level critical  --host 0.0.0.0 --port 5005 &
+      - uvicorn user_service:app --log-level critical  --host 0.0.0.0 --port 5003
 
+  url-shorten-service:
+    image: smj8612/social_network_mj:latest
+    container_name: url-shorten-service
+    expose:
+      - "5004"
+    deploy:
+      replicas: 1
+    command:
+      - /bin/sh
+      - -c
+      - uvicorn url_shorten_service:app --log-level critical  --host 0.0.0.0 --port 5004
+
+  user-mention-service:
+    image: smj8612/social_network_mj:latest
+    container_name: user-mention-service
+    expose:
+      - "5005"
+    deploy:
+      replicas: 1
+    command:
+      - /bin/sh
+      - -c
+      - uvicorn user_mention_service:app --log-level critical  --host 0.0.0.0 --port 5005
 
 
   text-service:
-    image: smj8612/social_network_ebpf_microservices_replicas:latest
-    privileged: true # needed for ebpf_exporter
-    volumes:
-      - '/sys:/sys:ro'
-      - '/usr/src:/usr/src:ro'
-      - '/lib/modules:/lib/modules:ro'
+    image: smj8612/social_network_mj:latest
+    container_name: text-service
     expose:
-#      - "9440" # needed for ebpf_exporter
-      - "5006" # needed for microservice
-    ports:
-      - "9515-9530:9515"
+      - "5006"
     deploy:
-        replicas: 1
-#    depends_on:
-#      jaeger-agent:
-#        condition: service_started
-    environment:
-      - OTEL_SERVICE_NAME=TextService # The name of the service for OpenTelemetry
+      replicas: 1
     command:
       - /bin/sh
       - -c
-      - |
-        uvicorn text_service:app --log-level critical  --host 0.0.0.0 --port 5006 &
-
+      - uvicorn text_service:app --log-level critical  --host 0.0.0.0 --port 5006
 
   compose-post-service:
-    image: smj8612/social_network_ebpf_microservices_replicas:latest
-    privileged: true # needed for ebpf_exporter
-    volumes:
-      - '/sys:/sys:ro'
-      - '/usr/src:/usr/src:ro'
-      - '/lib/modules:/lib/modules:ro'
+    image: smj8612/social_network_mj:latest
+    container_name: compose-post-service
     expose:
-#      - "9441" # needed for ebpf_exporter
-      - "5007" # needed for microservice
+      - "5007"
     deploy:
-        replicas: 1
-    ports:
-      - "9531-9546:9531"
-#    depends_on:
-#      jaeger-agent:
-#        condition: service_started
-    environment:
-      - OTEL_SERVICE_NAME=ComposePostService # The name of the service for OpenTelemetry
+      replicas: 1
     command:
       - /bin/sh
       - -c
-      - |
-        uvicorn compose_post_service:app --log-level critical  --host 0.0.0.0 --port 5007 &
-
+      - uvicorn compose_post_service:app --log-level critical  --host 0.0.0.0 --port 5007
 
 
   post-storage-service:
-    image: smj8612/social_network_ebpf_microservices_replicas:latest
-    privileged: true # needed for ebpf_exporter
-    volumes:
-      - '/sys:/sys:ro'
-      - '/usr/src:/usr/src:ro'
-      - '/lib/modules:/lib/modules:ro'
+    image: smj8612/social_network_mj:latest
+    container_name: post-storage-service
     expose:
-#      - "9442" # needed for ebpf_exporter
-      - "5008" # needed for microservice
-    ports:
-      - "9547-9562:9547"
+      - "5008"
     deploy:
-        replicas: 1
+      replicas: 1
     depends_on:
-#      jaeger-agent:
-#        condition: service_started
       post-storage-mongodb:
         condition: service_started
-    environment:
-      - OTEL_SERVICE_NAME=PostStorageService # The name of the service for OpenTelemetry
     command:
       - /bin/sh
       - -c
-      - |
-        uvicorn post_storage_service:app --log-level critical  --host 0.0.0.0 --port 5008 &
-
+      - uvicorn post_storage_service:app --log-level critical  --host 0.0.0.0 --port 5008
 
   user-timeline-service:
-    image: smj8612/social_network_ebpf_microservices_replicas:latest
-    privileged: true # needed for ebpf_exporter
-    volumes:
-      - '/sys:/sys:ro'
-      - '/usr/src:/usr/src:ro'
-      - '/lib/modules:/lib/modules:ro'
+    image: smj8612/social_network_mj:latest
+    container_name: user-timeline-service
     expose:
-#      - "9443" # needed for ebpf_exporter
-      - "5009" # needed for microservice
-    ports:
-      - "9563-9578:9563"
+      - "5009"
     deploy:
-        replicas: 1
+      replicas: 1
     depends_on:
-#      jaeger-agent:
-#        condition: service_started
       user-timeline-mongodb:
         condition: service_started
-    environment:
-      - OTEL_SERVICE_NAME=UserTimelineService # The name of the service for OpenTelemetry
     command:
       - /bin/sh
       - -c
-      - |
-        uvicorn user_timeline_service:app --log-level critical  --host 0.0.0.0 --port 5009 &
-
+      - uvicorn user_timeline_service:app --log-level critical  --host 0.0.0.0 --port 5009
 
   home-timeline-service:
-    image: smj8612/social_network_ebpf_microservices_replicas:latest
-    privileged: true # needed for ebpf_exporter
-    volumes:
-      - '/sys:/sys:ro'
-      - '/usr/src:/usr/src:ro'
-      - '/lib/modules:/lib/modules:ro'
+    image: smj8612/social_network_mj:latest
+    container_name: home-timeline-service
     expose:
-#      - "9444" # needed for ebpf_exporter
-      - "5010" # needed for microservice
-    ports:
-      - "9579-9594:9579"
+      - "5010"
     deploy:
-        replicas: 1
-#    depends_on:
-#      jaeger-agent:
-#        condition: service_started
-    environment:
-      - OTEL_SERVICE_NAME=HomeTimelineService # The name of the service for OpenTelemetry
+      replicas: 1
     command:
       - /bin/sh
       - -c
-      - |
-        uvicorn home_timeline_service:app --log-level critical --host 0.0.0.0 --port 5010 &
-
+      - uvicorn home_timeline_service:app --log-level critical --host 0.0.0.0 --port 5010
 
 
   social-graph-service:
-    image: smj8612/social_network_ebpf_microservices_replicas:latest
-    privileged: true # needed for ebpf_exporter
-    volumes:
-      - '/sys:/sys:ro'
-      - '/usr/src:/usr/src:ro'
-      - '/lib/modules:/lib/modules:ro'
+    image: smj8612/social_network_mj:latest
+    container_name: social-graph-service
     expose:
-#      - "9445" # needed for ebpf_exporter
-      - "5011" # needed for microservice
-    ports:
-      - "9595-9610:9595"
+      - "5011"
     deploy:
-        replicas: 1
+      replicas: 1
     depends_on:
-#      jaeger-agent:
-#        condition: service_started
       social-graph-mongodb:
         condition: service_started
-    environment:
-      - OTEL_SERVICE_NAME=SocialGraphService # The name of the service for OpenTelemetry
     command:
       - /bin/sh
       - -c
-      - |
-        uvicorn social_graph_service:app --log-level critical --host 0.0.0.0 --port 5011 &
-
+      - uvicorn social_graph_service:app --log-level critical --host 0.0.0.0 --port 5011
 
   # MongoDBs
   url-shorten-mongodb:
     image: mongo
     container_name: url-shorten-mongodb
-    #    networks:
-    #      - social-network
-    #    restart: always
     ports:
       - '27017:27017'
     command: mongod --quiet --logpath /dev/null
@@ -415,10 +195,6 @@ services:
   social-graph-mongodb:
     image: mongo
     container_name: social-graph-mongodb
-#    hostname: social-graph-mongodb
-    #    networks:
-    #      - social-network
-    #    restart: always
     ports:
       - '27018:27017'
     command: mongod --quiet --logpath /dev/null
@@ -426,42 +202,28 @@ services:
   post-storage-mongodb:
     image: mongo
     container_name: post-storage-mongodb
-    #    networks:
-    #      - social-network
     ports:
       - '27019:27017'
-    #    restart: always
     command: mongod --quiet --logpath /dev/null
 
   user-timeline-mongodb:
     image: mongo
     container_name: user-timeline-mongodb
-    #    networks:
-    #      - social-network
     ports:
       - '27020:27017'
-    #    restart: always
     command: mongod --quiet --logpath /dev/null
 
   home-timeline-mongodb:
     image: mongo
     container_name: home-timeline-mongodb
-    #    networks:
-    #      - social-network
     ports:
       - '27021:27017'
-    #    restart: always
     command: mongod --quiet --logpath /dev/null
 
 
   init-social-graph:
-    image: smj8612/social_network_ebpf_microservices_replicas:latest
-    hostname: init-social-graph
-    #    networks:
-    #      - social-network
-    #    volumes:
-    #      - './:/social-network-microservices'
-    #    working_dir: /social-network-microservices#    networks:
+    image: smj8612/social_network_mj:latest
+    container_name: init-social-graph
     depends_on:
       social-graph-mongodb:
         condition: service_started
@@ -473,14 +235,37 @@ services:
         condition: service_started
       post-storage-mongodb:
         condition: service_started
-#      empty-log-service:
-#        condition: service_started
     entrypoint:
       - python3
       - utils/init_social_graph.py
 
-#  empty-log-service:
-#    image: smj8612/social_network_ebpf_microservices_replicas:latest
-#    entrypoint:
-#      - python3
-#      - utils/empty_log.py
+
+  runq-exporter:
+    image: smj8612/runq-exporter:latest
+    privileged: true
+    container_name: runq-exporter
+    ports:
+      - "8000:8000"
+    depends_on:
+      - nginx
+      - unique-id-service
+      - media-service
+      - user-service
+      - url-shorten-service
+      - user-mention-service
+      - text-service
+      - url-shorten-mongodb
+      - social-graph-mongodb
+      - post-storage-mongodb
+      - home-timeline-mongodb
+      - user-timeline-mongodb
+      - init-social-graph
+      - compose-post-service
+      - post-storage-service
+      - user-timeline-service
+      - home-timeline-service
+      - social-graph-service
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/proc
+      - /home/ec2-user/runq_result:/home/ec2-user/runq_result
