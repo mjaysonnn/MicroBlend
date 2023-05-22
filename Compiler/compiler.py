@@ -4,34 +4,34 @@ import itertools
 import logging
 import os
 import shutil
-import sys
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
-from inspect import currentframe, getframeinfo
 from pprint import pformat
 from typing import List, Any, Dict, Union
 
 import astor
 import boto3
 
+
 # from compiler_module import loadbalancer_configuration, original_code
 # import loadbalancer
 
-# compiler_module_config = loadbalancer.ModuleConfigClass()
-benchmark_dir = "../BenchmarkApplication"
-# file_name = compiler_module_config.file_name
+class ModuleConfigClass:
+    """
+    # Implements a class for storing the configuration of the compiler module.
+    """
+    benchmark_dir = "../BenchmarkApplication"
+    file_name = ""
+
+
+compiler_module_config = ModuleConfigClass()
+benchmark_dir = compiler_module_config.benchmark_dir
+file_name = compiler_module_config.file_name
 
 # Logging Configuration
-modules_for_removing_debug = [
-    "urllib3",
-    "s3transfer",
-    "boto3",
-    "botocore",
-    "urllib3",
-    "requests",
-    "paramiko",
-]
+modules_for_removing_debug = ["urllib3", "s3transfer", "boto3", "botocore",
+                              "urllib3", "requests", "paramiko", ]
 for name in modules_for_removing_debug:
     logging.getLogger(name).setLevel(logging.CRITICAL)
 
@@ -40,11 +40,9 @@ logger.propagate = False
 logFormatter = logging.Formatter(
     "%(asctime)s [%(levelname)-6s] [%(filename)s:%(lineno)-4s]  %(message)s"
 )
-# fileHandler = logging.FileHandler(compiler_module_config.result_logfile_name)
+
 consoleHandler = logging.StreamHandler()
-# fileHandler.setFormatter(logFormatter)
 consoleHandler.setFormatter(logFormatter)
-# logger.addHandler(fileHandler)
 logger.addHandler(consoleHandler)
 logger.setLevel(logging.DEBUG)
 
@@ -60,7 +58,11 @@ class TargetGoalConfig:
 
 
 def return_vm_types():
-    vm_types_list = [
+    """
+    return list of vm types
+    :return:
+    """
+    return [
         "c5.large",
         "c3.large",
         "m4.large",
@@ -68,7 +70,6 @@ def return_vm_types():
         "c5.2xlarge",
         "c3.2xlarge",
     ]
-    return vm_types_list
 
 
 @dataclass
@@ -156,12 +157,10 @@ def make_dataclass_that_contains_whole_info(original_code_script, original_filen
     original_ast: ast.Module = ast.parse(original_code_script.read())
     module_for_analysis = copy.deepcopy(original_ast)
 
-    whole_info_class = WholeASTInfoClass(
-        file_name=original_filename,
-        original_code_module=original_ast,
-        copied_module_for_analysis=module_for_analysis,
-    )
-    return whole_info_class
+    return WholeASTInfoClass(file_name=original_filename,
+                             original_code_module=original_ast,
+                             copied_module_for_analysis=module_for_analysis,
+                             )
 
 
 @dataclass
@@ -172,13 +171,11 @@ class ASTObjectInfoClass:
 
 @dataclass(order=True)
 class ImportInfoClass(ASTObjectInfoClass):
-    # import_name: List = field(default_factory=list)
     import_name: str = None
-    # import_object: Any = None
-    # object_list: List = field(default_factory=list)
+
     from_python_script: bool = False
     from_import: list = field(default_factory=list)
-    # import_as: List = field(default_factory=list)
+
     import_as: list = field(default_factory=list)
     assign_targets_from_non_func: set = field(default_factory=set)
 
@@ -228,35 +225,22 @@ class NonFunctionInfoClass(ASTObjectInfoClass):
     description: str = None
 
 
-# @dataclass(order=True)
-# class ObjectsInIfMainInfoClass(ASTObjectInfoClass):
-#     object_type: str = None
-#     import_name_list: set = field(default_factory=set)
-#     assign_targets: list = field(default_factory=list)
-#     description: str = None
-
-
 @dataclass(order=True)
 class FunctionDefinition(ASTObjectInfoClass):
     func_name: str = False
-    # from_python_script: bool = False
+
     import_name_list: set = field(default_factory=set)
     assign_targets: list = field(default_factory=list)
     function_parameters: list = field(default_factory=list)
     return_objects: list = field(default_factory=list)
     return_object_ast: Any = None
 
-    # service_type_for_function: ServiceTypeForFunction = field(
-    #     default_factory=ServiceTypeForFunction
-    # )
-
     lambda_runtime_conf: LambdaConfig = field(default_factory=LambdaConfig)
     function_metric_rules: FunctionMetricRules = field(
         default_factory=FunctionMetricRules
     )
     initial_pragma: str = None
-    # merge_function: str = None
-    # initial_metric: Dict[str, Dict] = field(default_factory=defaultdict)
+
     lambda_group_name: str = "Default"
     func_call_for_lambda_handler: Union[ast.Assign, ast.Expr] = field(
         default_factory=list
@@ -277,12 +261,9 @@ class FunctionCallInfo(ASTObjectInfoClass):
 @dataclass
 class FunctionCallInsideIfMain(ASTObjectInfoClass):
     object_type: str = None
-    # called_in_function_object: ast.FunctionDef = None
-    # called_in_function_object_name: str = None
+
     callee_object: ast.Call = None
     callee_object_name: str = None
-    # assign_targets: list = field(default_factory=list)
-    # call_func_params: list = field(default_factory=list)
 
 
 @dataclass
@@ -326,8 +307,6 @@ class CompilerGeneratedLambdaForIFMainObject:
     lambda_name: str
     lambda_based_module_ast_object: ast.Module
     original_if_main_ast_object: ast.FunctionDef
-    # lambda_event_input_objs: List[ast.Assign] = field(default_factory=list)
-    # import_info_dict: dict = field(default_factory=defaultdict)
 
 
 @dataclass
@@ -439,12 +418,6 @@ def find_user_annotation_in_code(whole_info_class: WholeASTInfoClass, ):
     func_information = defaultdict(FunctionDefinition)
     func_names_to_annotate = []
 
-    # function_list_with_services = {
-    #     "Lambda": defaultdict(),
-    #     "VM": defaultdict(),
-    #     "Both": defaultdict(),
-    # }
-
     # Find pragma before annotation
     for child in ast.iter_child_nodes(whole_module):
         if isinstance(child, ast.FunctionDef):
@@ -467,52 +440,15 @@ def find_user_annotation_in_code(whole_info_class: WholeASTInfoClass, ):
                 logger.info("\tWill offload whole application")
                 whole_info_class.offloading_whole_application = True
 
-    # logger.debug(func_information)
-
     whole_info_class.function_information = dict(func_information)
     whole_info_class.function_list_for_annotation = func_names_to_annotate
 
-    # whole_info_class.function_list_with_services = dict(function_list_with_services)
-
-    # Skipping user annotation for now
-    # else:
-    #     # Function annotation with services
-    #     func_to_annotate = choose_functions_to_annotate(func_names_to_annotate)
-    #
-    #     if not func_to_annotate.strip():
-    #         logger2.info("[Faas, IaaS] to all functions")
-    #
-    #     elif func_to_annotate == "whole":
-    #         set_configuration_for_whole_app(func_information, whole_info_class)
-    #         return
-    #
-    #     else:
-    #         func_to_annotate = [x.strip() for x in func_to_annotate.split(",")]
-    #
-    #         # Iterate each function
-    #         for each_func_name in func_to_annotate:
-    #             set_config_for_each_function(
-    #                 each_func_name, func_information, function_list_with_services,
-    #             )
-    #
-    #     # Add remaining_func_list to {IaaS, FaaS}
-    #     remaining_func_list = [
-    #         f for f in func_names_to_annotate if f not in func_to_annotate
-    #     ]
-    #     function_list_with_services["Both"] = remaining_func_list
-    #
-    #     # Save function info and function with service candidate
-    #     whole_info_class.function_definition = dict(func_information)
-    #     whole_info_class.services_for_function = dict(function_list_with_services)
-
 
 def choose_functions_to_annotate(func_names_to_annotate):
-    functions_to_annotate = input(
+    return input(
         f"Choose functions you want to annotate "
         f"(f1, f2) or whole : {func_names_to_annotate}\n"
     )
-    # functions_to_annotate = "whole"
-    return functions_to_annotate
 
 
 def set_config_for_each_function(
@@ -567,17 +503,16 @@ def find_pragma_in_function(child, func_def: FunctionDefinition):
     for child_node in ast.iter_child_nodes(child):
 
         # Find comment
-        if isinstance(child_node, ast.Expr):
-            if isinstance(child_node.value, ast.Str):
-                split_comments = child_node.value.s.strip().split()
+        if isinstance(child_node, ast.Expr) and isinstance(child_node.value, ast.Str):
+            split_comments = child_node.value.s.strip().split()
 
-                # Iterator
-                it = iter(split_comments)
+            # Iterator
+            it = iter(split_comments)
 
-                # Fetch function metric rules
-                func_metrics = FunctionMetricRules()
+            # Fetch function metric rules
+            func_metrics = FunctionMetricRules()
 
-                iterate_comments_and_save_pragma(func_def, func_metrics, it)
+            iterate_comments_and_save_pragma(func_def, func_metrics, it)
 
     return func_def
 
@@ -588,9 +523,8 @@ def iterate_comments_and_save_pragma(func_def, function_metric_rules, it):
 
             c = next(it)
             # logger.debug(c)
-            if c == "Pragma":
-                if next(it) == "BEU":
-                    func_def.initial_pragma = next(it)
+            if c == "Pragma" and next(it) == "BEU":
+                func_def.initial_pragma = next(it)
 
             if c == "Combine":
                 func_def.lambda_group_name = next(it)
@@ -642,8 +576,6 @@ def set_metrics_for_whole_app():
         metrics_for_whole_app.cpu_operator = cpu_util_operator
         metrics_for_whole_app.use_default_value_for_cpu_util = False
 
-    # arrival_rate = input(f'arrival_rate (5) :\n')
-    # arrival_rate_operator = input(f'operator (>=):\n')
     arrival_rate, arrival_rate_operator = "5", ">="
 
     if arrival_rate.strip():
@@ -654,8 +586,6 @@ def set_metrics_for_whole_app():
         metrics_for_whole_app.arrival_rate_operator = arrival_rate_operator
         metrics_for_whole_app.use_default_value_for_arrival_rate = False
 
-    # memory_util = input(f'memory_util (70):\n')
-    # memory_util_operators = input(f'operator : (>=) :\n')
     memory_util, memory_util_operators = "", ""
 
     if memory_util.strip():
@@ -678,20 +608,14 @@ def set_lambda_config_for_whole_app():
     if lambda_memory.strip():
         lambda_config_for_whole_app.memory_size = lambda_memory
 
-    # lambda_timeout = input(f'lambda_config '
-    #                               f': [time_out (100):\n')
     lambda_timeout = ""
     if lambda_timeout.strip():
         lambda_config_for_whole_app.timeout = lambda_timeout
 
-    # lambda_runtime = input(f'lambda_config : '
-    #                               f'[runtime (py37):\n')
     lambda_runtime = ""
     if lambda_runtime.strip():
         lambda_config_for_whole_app.runtime = lambda_runtime
 
-    # lambda_name = input(f'lambda_config : '
-    #                               f'[name (None):\n')
     lambda_name = "resnet18_lambda"  # FIXME: for test
     if lambda_name.strip():
         lambda_config_for_whole_app.function_name = lambda_name
@@ -703,18 +627,12 @@ def provide_user_with_service_type(each_func_name):
     # Input for Service Type
     mixture_pragma = "IaaS, FaaS, {IaaS, FaaS}(default)"
 
-    # func_service = input(
-    #     f"{each_func_name} configuration : " f"service type - {mixture_pragma}:\n "
-    # )
-
-    func_service = "FaaS"  # FIXME: for test -> comment later
-
-    return func_service
+    return input(f"{each_func_name} configuration : "
+                 f"service type - {mixture_pragma}:\n "
+                 )
 
 
 def provide_user_with_memory_utilization(function_info):
-    # memory_util = input(f'{each_func_name} target metrics : memory_util (70):\n')
-    # memory_util_operators = input(f'{each_func_name} operator : (>=) :\n')
     memory_util, memory_util_operators = "", ""  # FIXME: for test -> comment later
 
     if memory_util != "":
@@ -830,17 +748,15 @@ def parse_and_save_info_for_each_function(whole_ast_info: WholeASTInfoClass):
                     merge_function=function_info.merge_function,
                 )
 
-            # fetch scaling policy for each function from user annotation
             else:
                 metrics_for_scaling_policy = function_info.function_metric_rules
 
                 metrics_dict = defaultdict(list)
 
                 # Add metrics with compare_operators
-                if metrics_for_scaling_policy.use_default_value_for_memory_util:
-                    pass
-
-                else:  # False means user annotation
+                if (
+                        not metrics_for_scaling_policy.use_default_value_for_memory_util
+                ):
                     metrics_dict["memory_util"].append(
                         metrics_for_scaling_policy.memory_util_operand
                     )
@@ -848,9 +764,9 @@ def parse_and_save_info_for_each_function(whole_ast_info: WholeASTInfoClass):
                         metrics_for_scaling_policy.memory_util_operator
                     )
 
-                if metrics_for_scaling_policy.use_default_value_for_cpu_util:
-                    pass
-                else:
+                if (
+                        not metrics_for_scaling_policy.use_default_value_for_cpu_util
+                ):
                     metrics_dict["cpu_util"].append(
                         metrics_for_scaling_policy.cpu_util_operand
                     )
@@ -858,10 +774,9 @@ def parse_and_save_info_for_each_function(whole_ast_info: WholeASTInfoClass):
                         metrics_for_scaling_policy.cpu_operator
                     )
 
-                if metrics_for_scaling_policy.use_default_value_for_arrival_rate:
-                    pass
-
-                else:
+                if (
+                        not metrics_for_scaling_policy.use_default_value_for_arrival_rate
+                ):
                     metrics_dict["arrival_rate"].append(
                         metrics_for_scaling_policy.arrival_rate_operand
                     )
@@ -878,42 +793,6 @@ def parse_and_save_info_for_each_function(whole_ast_info: WholeASTInfoClass):
 
     logging.debug("\n" + pformat(dict(function_with_service_candidate)))
     whole_ast_info.parsed_function_info_for_faas = function_with_service_candidate
-
-
-# def parse_and_save_info_for_whole_application(whole_ast_info):
-#     main_info = whole_ast_info.function_information.get("main")
-#
-#     service_with_metric_for_whole_app = FunctionWithServiceCandidate()
-#     metrics_dict = defaultdict(deque)
-#     it = iter(pragma_and_metrics)
-#     # logger2.debug(pragma_and_metrics)
-#     try:
-#         while True:
-#             c = next(it)
-#             if c == "BEU":
-#                 service_with_metric_for_whole_app.service_candidate = next(it)
-#
-#             if c == "Metric":
-#                 c = next(it)
-#                 if "arrival_rate" in c:
-#                     metrics_dict[c].appendleft(next(it))
-#                     metrics_dict[c].appendleft(next(it)[:-1])
-#                 if "cpu_util" in c:
-#                     metrics_dict[c].appendleft(next(it))
-#                     metrics_dict[c].appendleft(next(it)[:-1])
-#                 if "memory_util" in c:
-#                     metrics_dict[c].appendleft(next(it))
-#                     metrics_dict[c].appendleft(next(it)[:-1])
-#
-#     except StopIteration:
-#         pass
-#
-#     for _, value in metrics_dict.items():
-#         value = list(value)
-#     service_with_metric_for_whole_app.rules_for_scaling_policy = metrics_dict
-#     whole_ast_info.main_func_info_parsed_to_loadbalancer = (
-#         service_with_metric_for_whole_app
-#     )
 
 
 def show_result(whole_info):
@@ -952,13 +831,11 @@ def put_faas_pragma(beu_pragma_to_add, func_info_class):
         f"\n\t{beu_pragma_to_add} " f"{str(metrics_to_add).translate(translation)}\n\t"
     )
 
-    # Make or attach pragma to comment
-    comment_node = [
+    if comment_node := [
         child
         for child in ast.iter_child_nodes(func_info_class.ast_object)
         if isinstance(child, ast.Expr) and isinstance(child.value, ast.Str)
-    ]
-    if comment_node:
+    ]:
         comment_node[0].value.s = comment_node[0].value.s + beu_pragma_to_add + "\n\t"
     else:
         func_info_class.ast_object.body.insert(
@@ -971,12 +848,11 @@ def put_iaas_pragma(func_info_class, pragma_class):
     """
     Put IaaS Pragma -> No metrics needed
     """
-    comment_node = [
+    if comment_node := [
         child
         for child in ast.iter_child_nodes(func_info_class.ast_object)
         if isinstance(child, ast.Expr) and isinstance(child.value, ast.Str)
-    ]
-    if comment_node:
+    ]:
         comment_node[0].value.s = (
                 comment_node[0].value.s + pragma_class.vm_pragma + "\n\t"
         )
@@ -1020,46 +896,6 @@ def put_pragma_in_functions(whole_ast_info: WholeASTInfoClass, tree: ast.AST):
     if whole_ast_info.offloading_whole_application:
         logger.info("[Offloading whole app] : Check if pragma already exist")
 
-        # if whole_ast_info.offloading_whole_application:
-        #     logger.info("Already pragma for whole application -> Skipping")
-        #     return
-        # else:
-        #     # logger2.info(whole_ast_info.lambda_config_for_whole_application)
-        #
-        #     logger.info("Metrics for offloading whole application")
-        #     logger.info(
-        #         f"Function config : {whole_ast_info.lambda_config_for_whole_application}"
-        #     )
-        #     metrics = whole_ast_info.metrics_for_whole_application
-        #     if not metrics.use_default_value_for_cpu_util:
-        #         logger.info(f"CPU -> {metrics.cpu_util_operand} {metrics.cpu_operator}")
-        #     if not metrics.use_default_value_for_arrival_rate:
-        #         logger.info(
-        #             f"Arrival Rate : {metrics.arrival_rate_operand}"
-        #             f" {metrics.arrival_rate_operator}"
-        #         )
-        #     if not metrics.use_default_value_for_memory_util:
-        #         logger.info(
-        #             f"Memory -> {metrics.memory_util_operand} {metrics.memory_util_operator}"
-        #         )
-
-    # else:
-    #
-    #     function_dict_name_to_object = whole_ast_info.function_information
-    #
-    #     function_info_class: FunctionDefinition
-    #
-    #     for _, function_info_class in function_dict_name_to_object.items():
-    #
-    #         if function_info_class.initial_pragma:
-    #             continue
-    #         else:
-    #             put_pragma_comment_in_func(function_info_class)
-    #
-    #     ast.fix_missing_locations(tree)
-
-    # return
-
 
 @dataclass
 class ModuleConfigClass:
@@ -1067,16 +903,16 @@ class ModuleConfigClass:
     f_name: str = "resnet18_vm_for_test.py"
 
     # Workload Result Log
-    result_logfile_name: str = "log_folder/workload_result_log.json"
+    result_logfile_name: str = "log_folder/result_log/microblend_result.log"
     worker_log_file: str = "log_folder/workers_from_lb/workers.json"
 
     # Compiler Result Log
     bench_dir: str = "../BenchmarkApplication"
     module_dir: str = "import_modules"
     output_path_dir: str = "output"
-    lambda_code_dir_path: str = output_path_dir + "/lambda_codes"
-    deployment_zip_dir: str = output_path_dir + "/deployment_zip_dir"
-    hybrid_code_dir: str = output_path_dir + "/hybrid_vm"
+    lambda_code_dir_path: str = f"{output_path_dir}/lambda_codes"
+    deployment_zip_dir: str = f"{output_path_dir}/deployment_zip_dir"
+    hybrid_code_dir: str = f"{output_path_dir}/hybrid_vm"
     hybrid_code_file_name: str = "compiler_generated_hybrid_code"
     bucket_for_hybrid_code: str = "coco-hybrid-bucket-mj"
     bucket_for_lambda_handler_zip: str = "faas-code-deployment-bucket"
@@ -1540,16 +1376,15 @@ class ImportAndFunctionAnalyzer(ast.NodeVisitor):
         import_name_list = list(self.whole_ast_info.import_information.keys())
 
         if "boto3" not in import_name_list:
-            boto3_object = ast.Import(names=[ast.alias(name="boto3", asname=None)])
-            boto3_object = ast.fix_missing_locations(boto3_object)
-            boto3_info = Boto3AndJsonImportClass(ast_object=boto3_object)
-            self.whole_ast_info.boto3_and_json_imports["boto3"] = boto3_info
-
+            self.add_related_modules("boto3")
         if "json" not in import_name_list:
-            json_object = ast.Import(names=[ast.alias(name="json", asname=None)])
-            json_object = ast.fix_missing_locations(json_object)
-            json_info = Boto3AndJsonImportClass(ast_object=json_object)
-            self.whole_ast_info.boto3_and_json_imports["json"] = json_info
+            self.add_related_modules("json")
+
+    def add_related_modules(self, name):
+        boto3_object = ast.Import(names=[ast.alias(name=name, asname=None)])
+        boto3_object = ast.fix_missing_locations(boto3_object)
+        boto3_info = Boto3AndJsonImportClass(ast_object=boto3_object)
+        self.whole_ast_info.boto3_and_json_imports[name] = boto3_info
 
     def start_analyzing(self):
         """
@@ -1592,12 +1427,9 @@ def get_parameters_and_return_objects(node, specific_func_dict):
 
         # when number of return object is more than 2
         if isinstance(last_object_in_function.value, ast.Tuple):
-            return_objects = []
-            for each_object in last_object_in_function.value.elts:
-                return_objects.append(each_object)
+            return_objects = list(last_object_in_function.value.elts)
             specific_func_dict.return_objects = return_objects
 
-        # return object's number is 1
         elif isinstance(last_object_in_function.value, ast.Name):
             specific_func_dict.return_objects.append(last_object_in_function.value)
 
@@ -1615,10 +1447,9 @@ def get_assign_target_in_assign_objs(node: (ast.Assign, ast.AugAssign)):
 
             #  In case of tuple assignment e.g., a,b
             if isinstance(each_target, ast.Tuple):
-                for each_element in each_target.elts:
-                    assign_targets_list.append(each_element.id)
-
-            # In case of Subscript, e.g., a[3]
+                assign_targets_list.extend(
+                    each_element.id for each_element in each_target.elts
+                )
             elif isinstance(each_target, ast.Subscript):
                 # TODO: current is astor.to_source() but there must be better
                 # ways
@@ -1626,15 +1457,14 @@ def get_assign_target_in_assign_objs(node: (ast.Assign, ast.AugAssign)):
                     str(astor.to_source(each_target)).replace("\n", "")
                 )
 
-            #  In general case
             else:
                 assign_targets_list.append(each_target.id)
 
-    #  a += 3
     elif isinstance(node, ast.AugAssign):
         if isinstance(node.target, ast.Tuple):
-            for each_element in node.target.elts:
-                assign_targets_list.append(each_element.id)
+            assign_targets_list.extend(
+                each_element.id for each_element in node.target.elts
+            )
         else:
             assign_targets_list.append(node.target.id)
 
@@ -1693,7 +1523,7 @@ def make_lambda_func_for_default_group(
         original_func_info = function_information.get(each_func_name)
 
         # Change lambda function name
-        func_name = "lambda_handler_" + str(lambda_number_idx)
+        func_name = f"lambda_handler_{str(lambda_number_idx)}"
         function_args = get_default_lambda_function_inputs()
 
         # Get arguments for function parameters with a = event['a']
@@ -1801,9 +1631,9 @@ def make_lambda_func_for_lambda_group(
     # Get all the combination for switch case
     lambda_combination_list = []
     for i in range(len(sorted_func_info_list)):
-        for subset in itertools.combinations(sorted_func_info_list, i + 1):
-            lambda_combination_list.append(subset)
-
+        lambda_combination_list.extend(
+            iter(itertools.combinations(sorted_func_info_list, i + 1))
+        )
     # Make switch case for every subset of combinations
     if_statement_list = []
     lambda_input_per_if_statement = defaultdict()
@@ -1831,7 +1661,7 @@ def make_lambda_func_for_lambda_group(
             )
 
     lambda_handler = ast.FunctionDef(
-        name="lambda_handler_" + str(lambda_number_idx),
+        name=f"lambda_handler_{str(lambda_number_idx)}",
         args=get_default_lambda_function_inputs(),
         body=[func_with_params_assign_ast] + if_statement_list,
         decorator_list=[],
@@ -1845,7 +1675,7 @@ def make_lambda_func_for_lambda_group(
     logger.debug(astor.to_source(lambda_module))
 
     merged_lambda_info = MergedCompilerGeneratedLambda(
-        lambda_group_name="lambda_handler_" + str(lambda_number_idx),
+        lambda_group_name=f"lambda_handler_{str(lambda_number_idx)}",
         lambda_name_list=function_list,
         lambda_module=lambda_module,
         lambda_handler_func_object=lambda_handler,
@@ -2045,7 +1875,7 @@ def make_lambda_function_for_default_group(
     original_func_info = function_information.get(each_func_name)
 
     # Change lambda function name
-    func_name = "lambda_handler_" + str(lambda_number_idx)
+    func_name = f"lambda_handler_{str(lambda_number_idx)}"
     function_args = get_default_lambda_function_inputs()
 
     # Get arguments for function parameters with a = event['a']
@@ -2212,110 +2042,6 @@ def make_lambda_for_main_function(whole_ast_info: WholeASTInfoClass):
     whole_ast_info.module_info_for_offloading_whole_app = compiler_generated_lambda_info
 
 
-# def make_lambda_handler_from_if_main(function_info, whole_ast_info):
-#     # Make lambda function which has function call
-#     function_call_info_class = whole_ast_info.function_call_info_class
-#     # There is function call
-#     if function_call_info_class:
-#
-#         function_call_info: FunctionCallInfo
-#
-#         for i, (_, function_call_info) in enumerate(function_call_info_class.items()):
-#
-#             # function call that is called in main function
-#             if function_call_info.caller_object_name == "main":
-#                 function_object_that_is_called = function_call_info.caller_object
-#
-#                 copied_function_object = copy.deepcopy(function_object_that_is_called)
-#                 fund_info = function_info.get(function_object_that_is_called.name)
-#
-#                 # Lambda definition with event and context
-#                 copied_function_object.name = "lambda_handler_" + str(i + 1)
-#                 copied_function_object.args.args = ["event", "context"]
-#
-#                 # Lambda parameters
-#                 lambda_event_input_objs = []
-#                 for each_param in fund_info.function_parameters:
-#                     name_ast = ast.Name(id=each_param, ctx=ast.Store())
-#                     subscript_ast = ast.Subscript(
-#                         value=ast.Name(id="event", ctx=ast.Load()),
-#                         slice=ast.Index(value=ast.Str(s=each_param)),
-#                         ctx=ast.Load(),
-#                     )
-#                     assign_ast = ast.Assign(targets=[name_ast], value=subscript_ast)
-#                     copied_function_object.body.insert(0, assign_ast)
-#                     lambda_event_input_objs.append(assign_ast)
-#
-#                 # Copy copied module "body"
-#                 module_to_copy = whole_ast_info.copied_module_for_analysis
-#                 module_body_for_offloading_whole = module_to_copy.body[:]
-#
-#                 # Replace created function with main function
-#                 module_body_for_offloading_whole = [
-#                     copied_function_object if x == function_object_that_is_called else x
-#                     for x in module_body_for_offloading_whole
-#                 ]
-#                 # Remove if main object since we don't need it
-#                 module_body_for_offloading_whole.remove(
-#                     whole_ast_info.if_main_object.ast_object
-#                 )
-#
-#                 # Make module
-#                 module_for_offloading_whole_app = ast.Module(
-#                     body=module_body_for_offloading_whole
-#                 )
-#
-#                 # Save it into whole_information
-#                 compiler_generated_lambda_info = CompilerGeneratedLambdaForIFMainObject(
-#                     lambda_name=copied_function_object.name,
-#                     original_if_main_ast_object=function_object_that_is_called,
-#                     lambda_based_module_ast_object=module_for_offloading_whole_app,
-#                 )
-#
-#                 whole_ast_info.module_info_for_offloading_whole_app = (
-#                     compiler_generated_lambda_info
-#                 )
-
-
-# def make_lambda_function_for_if_main_object(whole_ast_info):
-#     # fetch if main object if exist
-#     if_main_obj_info = whole_ast_info.if_main_object
-#     if_main_obj = if_main_obj_info.ast_object
-#
-#     # Make lambda_handler function
-#     function_name = "lambda_handler"
-#     # Get function arguments
-#     function_args = get_default_lambda_function_inputs()
-#     # logger2.info(whole_ast_info.if_main_object.ast_object.__dict__)
-#     # Make lambda function and put object inside if main
-#     final_function_obj = ast.FunctionDef(
-#         name=function_name,
-#         args=function_args,
-#         body=if_main_obj.body,
-#         decorator_list=[],
-#         returns=None,
-#     )
-#
-#     # Copy copied module "body" -> body
-#     module_to_copy = whole_ast_info.copied_module_for_analysis
-#     module_body_for_offloading_whole = module_to_copy.body[:]
-#     # Replace created function with if_main_object
-#     module_body_for_offloading_whole = [
-#         final_function_obj if x == if_main_obj else x
-#         for x in module_body_for_offloading_whole
-#     ]
-#     module_for_offloading_whole_application = ast.Module(
-#         body=module_body_for_offloading_whole
-#     )
-#     # Save it into whole_information
-#     compiler_generated_lambda_info = CompilerGeneratedLambdaForIFMainObject(
-#         lambda_name=function_name,
-#         original_if_main_ast_object=if_main_obj,
-#         lambda_based_module_ast_object=module_for_offloading_whole_application,
-#     )
-#     whole_ast_info.module_info_for_offloading_whole_app = compiler_generated_lambda_info
-
-
 def get_default_lambda_function_inputs():
     return ast.arguments(
         posonlyargs=[],
@@ -2356,15 +2082,13 @@ def make_orchestrator_function() -> ast.FunctionDef:
 
     function_body = [upload_input_obj, invoke_function_and_download_output_to_vm]
 
-    final_function_obj = ast.FunctionDef(
+    return ast.FunctionDef(
         name=function_name,
         args=function_args_field_obj,
         body=function_body,
         decorator_list=[],
         returns=None,
     )
-
-    return final_function_obj
 
 
 def invoke_func_for_expr_obj():
@@ -2494,7 +2218,7 @@ def return_function_args_object():
         ast.NameConstant(value=False),
         ast.NameConstant(value=False),
     ]
-    function_field_args = ast.arguments(
+    return ast.arguments(
         args=function_parameters,
         vararg=None,
         kwonlyargs=[],
@@ -2502,8 +2226,6 @@ def return_function_args_object():
         kwarg=None,
         defaults=function_parameters_default_value,
     )
-
-    return function_field_args
 
 
 def make_for_object_of_uploading_input_to_s3():
@@ -2570,34 +2292,25 @@ def return_func_call_arguments(function_return_objects) -> List[ast.keyword]:
             arg="download_output_from_s3", value=ast.NameConstant(value=True)
         )
 
-        args_keywords = [
+        return [
             ast.keyword(arg="assign_obj", value=ast.NameConstant(value=True)),
-            ast.keyword(arg="input_to_s3", value=ast.NameConstant(value=False)),
+            ast.keyword(
+                arg="input_to_s3", value=ast.NameConstant(value=False)
+            ),
             ast_keyword_for_download_output_from_s3,
         ]
-        return args_keywords
     else:
         ast_keyword_for_download_output_from_s3 = ast.keyword(
             arg="download_output_from_s3", value=ast.NameConstant(value=False)
         )
 
-        args_keywords = [
+        return [
             ast.keyword(arg="expr_obj", value=ast.NameConstant(value=True)),
-            ast.keyword(arg="input_to_s3", value=ast.NameConstant(value=False)),
+            ast.keyword(
+                arg="input_to_s3", value=ast.NameConstant(value=False)
+            ),
             ast_keyword_for_download_output_from_s3,
         ]
-        return args_keywords
-
-    # ast_keyword_for_download_output_from_s3 = ast.keyword(
-    #     arg="download_output_from_s3", value=ast.NameConstant(value=False)
-    # )
-    #
-    # args_keywords = [
-    #     ast.keyword(arg="expr_obj", value=ast.NameConstant(value=True)),
-    #     ast.keyword(arg="input_to_s3", value=ast.NameConstant(value=True)),
-    #     ast_keyword_for_download_output_from_s3,
-    # ]
-    # return args_keywords
 
 
 def change_func_call_for_default_lambda_group(
@@ -2616,7 +2329,7 @@ def change_func_call_for_default_lambda_group(
     # Make dictionary for function parameters - {'a' : a},
     # invoke_function_using_lambda('resize', {'img_file_name':a)
     str_obj_of_call_func_params, name_obj_of_call_func_params = [], []
-    for idx, each_argument in enumerate(func_call_obj.args):
+    for each_argument in func_call_obj.args:
         name_obj_of_call_func_params.append(each_argument)
         str_obj_of_call_func_params.append(each_argument.id)
 
@@ -2650,20 +2363,14 @@ def output_dependency(copied_func_call, whole_ast_info):
     each_function_call: FunctionCallInfo
     for _, each_function_call in whole_ast_info.function_call_info_class.items():
 
-        # get function call input parameters and call object
-        function_call_input_list = [i.id for i in each_function_call.call_func_params]
-
-        # fetch func call object
-        calling_obj_from_each_function_call = each_function_call.callee_object
-
-        # check if function calls are in the same function callee object
         if callee_func_name == each_function_call.caller_object_name:
-
-            # check if assign target of copied_func_call is used other function calls
+            # get function call input parameters and call object
+            function_call_input_list = [i.id for i in each_function_call.call_func_params]
 
             if set(assign_node_target_list).intersection(set(function_call_input_list)):
+                # fetch func call object
+                calling_obj_from_each_function_call = each_function_call.callee_object
 
-                # check if line number for ordering -
                 if call_obj.lineno < calling_obj_from_each_function_call.lineno:
                     for each_keyword in call_obj.keywords:
                         if each_keyword.arg == "download_output_from_s3":
@@ -2685,15 +2392,12 @@ def input_dependency(copied_func_call, whole_ast_info):
     each_function_call: FunctionCallInfo
     for _, each_function_call in whole_ast_info.function_call_info_class.items():
 
-        if each_function_call.object_type == "Assign":
-
-            assign_targets = each_function_call.assign_targets
-
-            calling_obj_from_each_function_call = each_function_call.callee_object
-
-            if callee_func_name == each_function_call.caller_object_name:
+        if callee_func_name == each_function_call.caller_object_name:
+            if each_function_call.object_type == "Assign":
+                assign_targets = each_function_call.assign_targets
 
                 if set(assign_targets).intersection(set(call_func_parameters_name)):
+                    calling_obj_from_each_function_call = each_function_call.callee_object
 
                     if call_obj.lineno > calling_obj_from_each_function_call.lineno:
                         for each_keyword in call_obj.keywords:
@@ -2886,26 +2590,20 @@ def function_call_orchestrator(whole_ast_info: WholeASTInfoClass) -> None:
                         )
 
                         # check if function calls are in the same function callee object
-                        if callee_func_name == each_function_call.caller_object_name:
-
-                            # check if assign target of copied_func_call is used other function calls
-
-                            if set(assign_node_target_list).intersection(
-                                    set(function_call_input_list)
-                            ):
-
-                                # check if line number for ordering -
+                        if callee_func_name == each_function_call.caller_object_name and set(
+                                assign_node_target_list).intersection(
+                            set(function_call_input_list)
+                        ) and (
+                                call_obj.lineno
+                                < calling_obj_from_each_function_call.lineno
+                        ):
+                            for each_keyword in call_obj.keywords:
                                 if (
-                                        call_obj.lineno
-                                        < calling_obj_from_each_function_call.lineno
+                                        each_keyword.arg
+                                        == "download_output_from_s3"
                                 ):
-                                    for each_keyword in call_obj.keywords:
-                                        if (
-                                                each_keyword.arg
-                                                == "download_output_from_s3"
-                                        ):
-                                            logger.debug(each_keyword.arg)
-                                            each_keyword.value.value = True
+                                    logger.debug(each_keyword.arg)
+                                    each_keyword.value.value = True
 
                     for each_keyword in call_obj.keywords:
                         if each_keyword.arg == "download_output_from_s3":
@@ -2917,70 +2615,6 @@ def function_call_orchestrator(whole_ast_info: WholeASTInfoClass) -> None:
                     # logger.debug(astor.to_source(whole_ast_info.lambda_function_info))
 
         return
-
-    #     each_func_call_info: FunctionCallInfo  # Iterate each func call
-    #     for idx, each_func_call_info in enumerate(func_call_of_lambda):
-    #
-    #         # Copy function_call_info_class. Need original later for dependency
-    #         copied_func_call = copy.deepcopy(each_func_call_info)
-    #         func_call_obj: ast.Call = copied_func_call.callee_object
-    #         func_call_obj_name = copied_func_call.callee_object_name
-    #
-    #         # Find out lambda group name
-    #         lambda_group_name = "Default"
-    #         for group_name, func_list in sort_by_lambda_group.items():
-    #             if func_call_obj_name in func_list:
-    #                 lambda_group_name = group_name
-    #
-    #         if lambda_group_name == "Default":
-    #
-    #             # Add it to whole_information
-    #             whole_ast_info.func_call_using_lambda.append(
-    #                 LambdaBasedFunctionCallInfoClass(
-    #                     copied_func_call_info=copied_func_call,
-    #                     original_func_call_info=each_func_call_info,
-    #                 )
-    #             )
-    #
-    #             change_func_call_for_default_lambda_group(
-    #                 func_call_obj, func_call_obj_name, whole_ast_info
-    #             )
-    #             check_data_dependency(copied_func_call, whole_ast_info)
-    #
-    #         else:
-    #
-    #             func_name_to_combine = [func_call_obj_name]
-    #
-    #             func_list = sort_by_lambda_group.get(lambda_group_name)
-    #             cur_index = func_list.index(func_call_obj_name)
-    #
-    #             for i in range(cur_index, len(func_list)):
-    #                 next_function = func_list[i + 1]
-    #                 next_f_call = func_call_of_lambda[idx + 1]
-    #                 next_callee_object_name = next_f_call.callee_object_name
-    #                 if next_f_call == next_function:
-    #                     logger.debug("yes")
-    #
-    #             # 포함됬으면 다른 function call 넘어간다
-    #
-    #             # See if next func call belongs to lambda group with ordering:
-    #
-    #             next_callee_object_name = next_f_call.callee_object_name
-    #
-    #             func_list = sort_by_lambda_group.get(lambda_group_name)
-    #
-    #             if next_callee_object_name in func_list:
-    #                 cur_index = func_list.index(func_call_obj_name)
-    #                 next_index = func_list.index(next_callee_object_name)
-    #                 logger.debug(cur_index)
-    #                 logger.debug(next_index)
-    #                 # if cur_index < next_index:
-    #
-    #             sys.exit(getframeinfo(currentframe()))
-    #
-    #             pass
-    #
-    # return
 
 
 def make_function_orchestrator_func(whole_ast_info):
@@ -2994,17 +2628,7 @@ def make_obj_for_uploading_return_obj_to_s3(return_object_list):
     s3_client.upload("Return")
     """
     upload_obj_list = []
-    # ast.If(test=ast.Name(id='input_to_s3', ctx=ast.Load()), body=[
-    #     ast.Expr(value=ast.Call(
-    #         func=ast.Attribute(value=ast.Name(id='s3_client', ctx=ast.Load()), attr='upload_file',
-    #                            ctx=ast.Load()),
-    #         args=[
-    #             ast.BinOp(left=ast.Str(s='/tmp/'), op=ast.Add(),
-    #                       right=ast.Name(id='each_input', ctx=ast.Load())),
-    #             ast.Str(s='bucket-for-coco-compiler'),
-    #             ast.Name(id='each_input', ctx=ast.Load()),
-    #         ], keywords=[])),
-    # ], orelse=[])
+
     for each_input_param in return_object_list:
         download_obj = ast.Expr(
             value=ast.Call(
@@ -3147,9 +2771,7 @@ def add_using_s3_in_lambda_handler(whole_ast_info: WholeASTInfoClass) -> None:
                         each_object_for_downloading_input,
                     )
 
-                return_objects = original_func_info.return_objects
-
-                if return_objects:
+                if return_objects := original_func_info.return_objects:
                     put_return_objs_for_s3(lambda_func_object, return_objects)
             elif isinstance(
                     each_compiler_generated_lambda, MergedCompilerGeneratedLambda
@@ -3199,11 +2821,9 @@ def add_using_s3_in_lambda_handler(whole_ast_info: WholeASTInfoClass) -> None:
                             )
 
                         logger.debug(each_compiler_generated_lambda)
-                        # logger.debug(last_event_input_obj_index)
-                        return_objects = each_compiler_generated_lambda.return_obj_per_if_statement.get(
-                            each_ast
-                        )
-                        if return_objects:
+                        if return_objects := each_compiler_generated_lambda.return_obj_per_if_statement.get(
+                                each_ast
+                        ):
                             put_return_objs_for_s3(each_ast, return_objects)
 
                         logger.debug(astor.to_source(each_ast))
@@ -3283,7 +2903,7 @@ def add_event_input_assign_objs_in_lambda_handler(
 
 def put_return_objs_for_s3(lambda_func_object, return_objects):
     obj_for_uploading_to_s3 = make_obj_for_uploading_return_obj_to_s3(return_objects)
-    for idx, each_obj in enumerate(obj_for_uploading_to_s3):
+    for each_obj in obj_for_uploading_to_s3:
         lambda_func_object.body.insert(len(lambda_func_object.body) - 1, each_obj)
 
 
@@ -3580,20 +3200,17 @@ def make_lambda_code_directory(whole_ast_info: WholeASTInfoClass) -> None:
 
     logger.info("Make directory for lambda functions")
 
+    # Fetch lambda dir where each lambda handler is used
+    lambda_code_path = "./lambda_path"
+
     if whole_ast_info.offloading_whole_application:
         logger.info("[Offloading whole app] : Make only one directory")
-
-        # Fetch lambda dir where each lambda handler is used
-        lambda_code_path = compiler_module_config.lambda_code_dir_path
 
         # Make Folder for lambda codes
         if os.path.exists(lambda_code_path):
             logger.info(f"Empty {lambda_code_path}")
-            os.system("rm -rf %s" % lambda_code_path)
-            os.makedirs(lambda_code_path)
-        else:
-            os.makedirs(lambda_code_path)
-
+            os.system(f"rm -rf {lambda_code_path}")
+        os.makedirs(lambda_code_path)
         # Fetch module
         module_info = whole_ast_info.module_info_for_offloading_whole_app
 
@@ -3611,22 +3228,17 @@ def make_lambda_code_directory(whole_ast_info: WholeASTInfoClass) -> None:
         native_code = astor.to_source(lambda_module_obj)
 
         # Write code to sub_dir
-        with open(os.path.join(sub_dir, lambda_name + ".py"), "w") as temp_file:
+        with open(os.path.join(sub_dir, f"{lambda_name}.py"), "w") as temp_file:
             temp_file.write(native_code)
 
         return
 
     else:
-        lambda_code_path = compiler_module_config.lambda_code_dir_path
-
         # Make Folder for lambda codes
         if os.path.exists(lambda_code_path):
             logger.info(f"Empty {lambda_code_path}")
-            os.system("rm -rf %s" % lambda_code_path)
-            os.makedirs(lambda_code_path)
-        else:
-            os.makedirs(lambda_code_path)
-
+            os.system(f"rm -rf {lambda_code_path}")
+        os.makedirs(lambda_code_path)
         # Fetch module
         module_info = whole_ast_info.lambda_handler_module_dict
         lambda_info_dict = whole_ast_info.lambda_function_info
@@ -3646,13 +3258,13 @@ def make_lambda_code_directory(whole_ast_info: WholeASTInfoClass) -> None:
                 native_code = astor.to_source(lambda_module_obj)
 
                 # Write code to sub_dir
-                with open(os.path.join(sub_dir, lambda_name + ".py"), "w") as temp_file:
+                with open(os.path.join(sub_dir, f"{lambda_name}.py"), "w") as temp_file:
                     temp_file.write(native_code)
 
-        # logger.debug(module_info)
-        # logger.debug(lambda_info)
+            # logger.debug(module_info)
+            # logger.debug(lambda_info)
 
-        # sys.exit(getframeinfo(currentframe()))
+            # sys.exit(getframeinfo(currentframe()))
 
     # Make Folder for lambda codes
     # if os.path.exists(lambda_code_path):
@@ -3668,17 +3280,14 @@ def make_lambda_code_directory(whole_ast_info: WholeASTInfoClass) -> None:
 
     if not lambda_handler_module_dict:
         if os.path.exists(lambda_code_path):
-            os.system("rm -rf %s" % lambda_code_path)
+            os.system(f"rm -rf {lambda_code_path}")
         return
 
     # find if there output/lambda_codes. Remove if already exist or make
     # directory
     if os.path.exists(lambda_code_path):
-        os.system("rm -rf %s" % lambda_code_path)
-        os.makedirs(lambda_code_path)
-    else:
-        os.makedirs(lambda_code_path)
-
+        os.system(f"rm -rf {lambda_code_path}")
+    os.makedirs(lambda_code_path)
     lambda_handler_module: ast.Module
     for (
             lambda_handler_name,
@@ -3692,7 +3301,7 @@ def make_lambda_code_directory(whole_ast_info: WholeASTInfoClass) -> None:
         native_code = astor.to_source(lambda_handler_module)
 
         # Write code to sub_dir
-        with open(os.path.join(sub_dir, lambda_handler_name + ".py"), "w") as temp_file:
+        with open(os.path.join(sub_dir, f"{lambda_handler_name}.py"), "w") as temp_file:
             temp_file.write(native_code)
 
 
@@ -3704,38 +3313,7 @@ def insert_imports_in_lambda_code_folder(whole_ast_info: WholeASTInfoClass) -> N
     logger.info("Link library modules for lambda handlers")
 
     if whole_ast_info.offloading_whole_application:
-        logger.info("[Offloading whole app] : Link library modules")
-
-        # Fetch import modules in directory
-        import_modules_dir, module_lists = bring_module_list_in_import_modules_folder()
-
-        # Fetch module
-        module_to_offload = whole_ast_info.module_info_for_offloading_whole_app
-
-        # Combine lambda dir with lambda name
-        lambda_dir = os.path.join(
-            compiler_module_config.lambda_code_dir_path, module_to_offload.lambda_name
-        )
-
-        # Fetch all import modules used in this soure code
-        import_list = module_to_offload.import_name_list
-
-        # In case of library dependency e.g., mxnet, matplotlib
-        consider_dependency_between_modules(import_list)
-
-        # Group import name depending on python script or not
-        import_group_by_python_script = group_import_by_from_script(whole_ast_info)
-
-        module_list = list(import_group_by_python_script.values())[0]
-        logger.info(f"Import modules : {module_list}")
-
-        # Iterate each import name in source code
-        iterate_and_put_import_modules(
-            import_group_by_python_script, import_modules_dir, lambda_dir, module_lists
-        )
-
-        return
-
+        offload_whole_application(whole_ast_info)
     else:
         # Fetch import modules in directory
         import_modules_dir, module_lists = bring_module_list_in_import_modules_folder()
@@ -3743,7 +3321,7 @@ def insert_imports_in_lambda_code_folder(whole_ast_info: WholeASTInfoClass) -> N
         # Fetch module
         lambda_info_dict = whole_ast_info.lambda_function_info
 
-        lambda_code_path = compiler_module_config.lambda_code_dir_path
+        lambda_code_path = "./lambda_path"
 
         for lambda_name, lambda_info in lambda_info_dict.items():
 
@@ -3773,56 +3351,39 @@ def insert_imports_in_lambda_code_folder(whole_ast_info: WholeASTInfoClass) -> N
                     lambda_dir,
                     module_lists,
                 )
-        return
+    return
 
-    lambda_handler_module_dict: Dict[
-        str, ast.Module
-    ] = whole_ast_info.lambda_handler_module_dict
 
-    if not lambda_handler_module_dict:
-        return
+def offload_whole_application(whole_ast_info):
+    logger.info("[Offloading whole app] : Link library modules")
 
-    compiler_generated_lambda_handler_dict: Dict[
-        str, CompilerGeneratedLambda
-    ] = whole_ast_info.compiler_generated_lambda_handler_dict
+    # Fetch import modules in directory
+    import_modules_dir, module_lists = bring_module_list_in_import_modules_folder()
 
-    # get all import in modules directory
-    module_lists = []
-    for (_, dir_names, _) in os.walk(
-            os.path.join(os.getcwd(), compiler_module_config.module_dir)
-    ):
-        module_lists.extend(dir_names)  # contains each module directory
-        break
+    # Fetch module
+    module_to_offload = whole_ast_info.module_info_for_offloading_whole_app
 
-    #  iterate each lambda handler
-    lambda_info: CompilerGeneratedLambda
-    for (
-            lambda_handler_name,
-            lambda_info,
-    ) in compiler_generated_lambda_handler_dict.items():
+    # Combine lambda dir with lambda name
+    lambda_dir = os.path.join(
+        "./lambda_path", module_to_offload.lambda_name
+    )
 
-        # get import name list per lambda handler
-        import_list: List[str] = list(lambda_info.import_info_dict.keys())
+    # Fetch all import modules used in this soure code
+    import_list = module_to_offload.import_name_list
 
-        for each_import_name in import_list:
+    # In case of library dependency e.g., mxnet, matplotlib
+    consider_dependency_between_modules(import_list)
 
-            # fetch lambda handler directory
-            lambda_dir = os.path.join(
-                compiler_module_config.lambda_code_dir_path, lambda_handler_name
-            )
+    # Group import name depending on python script or not
+    import_group_by_python_script = group_import_by_from_script(whole_ast_info)
 
-            # if import is from python script
-            if each_import_name in whole_ast_info.imports_from_python_script:
-                python_script_dir = os.path.join(os.getcwd(), each_import_name + ".py")
-                os.system("cp -r %s %s" % (python_script_dir, lambda_dir))
+    module_list = list(import_group_by_python_script.values())[0]
+    logger.info(f"Import modules : {module_list}")
 
-            # iterate each module  and put it inside lambda handler directory
-            for each_module in module_lists:
-                if each_module.lower().startswith(each_import_name.lower()):
-                    module_dir = os.path.join(
-                        compiler_module_config.module_dir, each_module
-                    )
-                    os.system("cp -r %s %s" % (module_dir, lambda_dir))
+    # Iterate each import name in source code
+    iterate_and_put_import_modules(
+        import_group_by_python_script, import_modules_dir, lambda_dir, module_lists
+    )
 
 
 def iterate_and_put_import_modules(
@@ -3830,17 +3391,16 @@ def iterate_and_put_import_modules(
 ):
     for from_python_script, import_list in import_group_by_python_script.items():
 
-        if from_python_script:  # If from python script
-            for each_import_name in import_list:
-                python_script_dir = os.path.join(os.getcwd(), each_import_name + ".py")
-                os.system("cp -r %s %s" % (python_script_dir, lambda_dir))
+        for each_import_name in import_list:
+            if from_python_script:  # If from python script
+                python_script_dir = os.path.join(os.getcwd(), f"{each_import_name}.py")
+                os.system(f"cp -r {python_script_dir} {lambda_dir}")
 
-        else:  # Default import modules
-            for each_import_name in import_list:
+            else:  # Default import modules
                 for each_module in module_lists:
                     if each_module.lower().startswith(each_import_name.lower()):
                         module_dir = os.path.join(import_modules_dir, each_module)
-                        os.system("cp -r %s %s" % (module_dir, lambda_dir))
+                        os.system(f"cp -r {module_dir} {lambda_dir}")
 
 
 def group_import_by_from_script(whole_ast_info):
@@ -3853,7 +3413,6 @@ def group_import_by_from_script(whole_ast_info):
 
 
 def consider_dependency_between_modules(import_list):
-    # Matplotlib # TODO : Library Dependency Needs Thought
     if "matplotlib" in import_list:
         import_list.remove("matplotlib")
         import_list.remove("numpy")
@@ -3865,7 +3424,7 @@ def consider_dependency_between_modules(import_list):
 
 
 def bring_module_list_in_import_modules_folder():
-    import_modules_dir = compiler_module_config.module_dir
+    import_modules_dir = "./compiler_module_config.module_dir"
     module_lists = []
     for (_, dir_names, _) in os.walk(os.path.join(os.getcwd(), import_modules_dir)):
         module_lists.extend(dir_names)
@@ -3912,16 +3471,16 @@ def make_lambda_function(lambda_deploy_info, whole_info):
 def create_lambda_function_by_cli(lambda_deploy_info, whole_info):
     lambda_client = boto3.client("lambda", region_name="us-east-1", **CREDENTIALS)
 
+    function_name = lambda_deploy_info.lambda_name_to_make_on_aws
     if whole_info.offloading_whole_application:
 
         object_in_s3 = whole_info.deployment_name_for_offloading_whole_app
-        function_name = lambda_deploy_info.lambda_name_to_make_on_aws
         handler_name = lambda_deploy_info.handler_name
         logger.info(f"using zip named - {object_in_s3}")
         lambda_client.create_function(
             # Code={"ZipFile": open(lambda_zip_name, "rb").read()},
             Code={
-                "S3Bucket": compiler_module_config.bucket_for_lambda_handler_zip,
+                "S3Bucket": "./compiler_module_config.bucket_for_lambda_handler_zip",
                 "S3Key": object_in_s3,
                 # how can i create or fetch this S3Key
             },
@@ -3936,11 +3495,10 @@ def create_lambda_function_by_cli(lambda_deploy_info, whole_info):
 
     else:
         zip_object = lambda_deploy_info.zip_file_name_in_s3
-        function_name = lambda_deploy_info.lambda_name_to_make_on_aws
         handler_name = lambda_deploy_info.handler_name
         lambda_client.create_function(
             Code={
-                "S3Bucket": compiler_module_config.bucket_for_lambda_handler_zip,
+                "S3Bucket": "./compiler_module_config.bucket_for_lambda_handler_zip",
                 "S3Key": zip_object,
                 # how can i create or fetch this S3Key
             },
@@ -3963,7 +3521,6 @@ def map_func_to_func_arn(whole_ast_info: WholeASTInfoClass) -> None:
 
     if whole_ast_info.offloading_whole_application:
         logger.info("[Offloading whole app] : Skip since no func call orchestrator")
-        return
     else:
         lambda_info_dict = whole_ast_info.lambda_function_info
         lambda_deployment_zip_info = whole_ast_info.lambda_deployment_zip_info
@@ -4017,54 +3574,7 @@ def map_func_to_func_arn(whole_ast_info: WholeASTInfoClass) -> None:
 
         whole_ast_info.map_func_to_func_arn_object = map_func_to_func_arn_object
         logger.debug(astor.to_source(annotated_code_module))
-        # sys.exit(getframeinfo(currentframe()))
-        return
-
-    lambda_deployment_info = whole_ast_info.lambda_function_info
-    annotated_code_module = whole_ast_info.copied_module_for_analysis
-    non_func_info = whole_ast_info.non_function_object_info
-
-    original_func_list = []
-    lambda_func_name_in_aws = []
-
-    # save function name and function arn information
-    deployment_info: LambdaDeployInfo
-    for _, deployment_info in lambda_deployment_info.items():
-        original_func_list.append(ast.Str(s=deployment_info.original_func_name))
-        lambda_func_name_in_aws.append(
-            ast.Str(s=deployment_info.lambda_name_to_make_on_aws)
-        )
-
-    # find last non_func_info and add above assign object to the last one
-    last_non_func_obj_info: NonFunctionInfoClass = list(
-        whole_ast_info.non_function_object_info.values()
-    )[-1]
-    last_non_func_obj = last_non_func_obj_info.ast_object
-    index_for_last_non_func_object = (
-            annotated_code_module.body.index(last_non_func_obj) + 1
-    )
-
-    # make assign object that contains mapping function
-    map_func_to_func_arn_object = ast.Assign(
-        targets=[ast.Name(id="map_func_to_func_arn_dict", ctx=ast.Store())],
-        value=ast.Dict(keys=original_func_list, values=lambda_func_name_in_aws),
-        lineno=last_non_func_obj.lineno + 1,
-        col_offset=0,
-    )
-
-    # add this object right after last non_func_obj
-    annotated_code_module.body = (
-            annotated_code_module.body[:index_for_last_non_func_object]
-            + [map_func_to_func_arn_object]
-            + (annotated_code_module.body[index_for_last_non_func_object:])
-    )
-
-    # add this assign object to non_func_info
-    non_func_info[map_func_to_func_arn_object] = NonFunctionInfoClass(
-        last_non_func_obj_info.line_number + 1,
-        ast_object=map_func_to_func_arn_object,
-        non_func_object_type="Assign",
-    )
+    return
 
     # logger.info(astor.to_source(annotated_code_module))
 
@@ -4248,7 +3758,6 @@ def write_hybrid_code(whole_ast_info: WholeASTInfoClass):
             annotated_code_module = ast.fix_missing_locations(annotated_code_module)
 
         # Add lambda and s3 client using boto3
-        # TODO: What if they already exist?
         lambda_client_object = make_lambda_client()
         s3_client_object = make_s3_client()
 
@@ -4323,9 +3832,7 @@ class RemoveNodeTransformer(ast.NodeTransformer):
         # self.copied_ast = copied_ast
 
     def visit_Assign(self, node):
-        if node == self.original_ast:
-            return None
-        return node
+        return None if node == self.original_ast else node
 
         #     node = self.copied_ast
 
@@ -4353,31 +3860,24 @@ def save_hybrid_code_in_output_directory(whole_ast_info: WholeASTInfoClass) -> N
         return
 
     hybrid_code_to_write = whole_ast_info.copied_module_for_analysis
-    hybrid_code_dir = compiler_module_config.hybrid_code_dir
-    hybrid_code_file_name = compiler_module_config.hybrid_code_file_name
+    hybrid_code_dir = "./lambda_hybrid_code_path"
+    hybrid_code_file_name = "./compiler_module_config.hybrid_code_file_name"
 
     # remove directory if already exists
     if os.path.exists(hybrid_code_dir):
-        os.system("rm -rf %s" % hybrid_code_dir)
-        os.makedirs(hybrid_code_dir)
-    else:
-        os.makedirs(hybrid_code_dir)
-
+        os.system(f"rm -rf {hybrid_code_dir}")
+    os.makedirs(hybrid_code_dir)
     # write code to directory
     hybrid_code = astor.to_source(hybrid_code_to_write)
-    with open(
-            os.path.join(hybrid_code_dir, hybrid_code_file_name + ".py"), "w"
-    ) as temp_file:
+    with open(os.path.join(hybrid_code_dir, f"{hybrid_code_file_name}.py"), "w") as temp_file:
         temp_file.write(hybrid_code)
 
 
 def empty_output():
-    output_dir = compiler_module_config.output_path_dir
+    output_dir = "./compiler_module_config.output_path_dir"
     if os.path.exists("output"):
-        os.system("rm -rf %s" % output_dir)
-        os.makedirs(output_dir)
-    else:
-        os.makedirs(output_dir)
+        os.system(f"rm -rf {output_dir}")
+    os.makedirs(output_dir)
 
 
 def make_zip_file_for_lambda_handler(whole_ast_info: WholeASTInfoClass) -> None:
@@ -4386,89 +3886,30 @@ def make_zip_file_for_lambda_handler(whole_ast_info: WholeASTInfoClass) -> None:
     """
     logger.info("Zip library modules and code for deployment")
 
+    # delete if exists and make directory
+    deployment_zip_dir = "./compiler_module_config.deployment_zip_dir"
     if whole_ast_info.offloading_whole_application:
-        logger.info("[Offloading whole app] : Making only one zip")
-
-        # delete if exists and make directory
-        deployment_zip_dir = compiler_module_config.deployment_zip_dir
-        if os.path.exists(deployment_zip_dir):
-            os.system("rm -rf %s" % deployment_zip_dir)
-            os.makedirs(deployment_zip_dir)
-        else:
-            os.makedirs(deployment_zip_dir)
-
-        # Fetch module and lambda name
-        module_info = whole_ast_info.module_info_for_offloading_whole_app
-        lambda_dir = compiler_module_config.lambda_code_dir_path
-        lambda_name = module_info.lambda_name
-
-        # Zip code with modules
-        shutil.make_archive(
-            "lambda_handler", "zip", os.path.join(lambda_dir, lambda_name)
+        make_zip_for_whole_app(
+            deployment_zip_dir, whole_ast_info
         )
-        # Move zip file to deployment_zip_dir
-        shutil.move(
-            "lambda_handler" + ".zip", os.path.join(os.getcwd(), deployment_zip_dir)
-        )
-        logger.info("Zipped Module")
-        return
     else:
-        lambda_handler_module_dict: Dict[
-            str, ast.Module
-        ] = whole_ast_info.lambda_handler_module_dict
+        make_zip_for_whole_app(
+            whole_ast_info, deployment_zip_dir
+        )
+    return
 
-        # delete if exists and make directory
-        deployment_zip_dir = compiler_module_config.deployment_zip_dir
-        if os.path.exists(deployment_zip_dir):
-            os.system("rm -rf %s" % deployment_zip_dir)
-            os.makedirs(deployment_zip_dir)
-        else:
-            os.makedirs(deployment_zip_dir)
 
-        lambda_code_dir_path = compiler_module_config.lambda_code_dir_path
-
-        logger.debug(lambda_code_dir_path)
-
-        # find lambda handler list in lambda_code_dir_path
-        lambda_dir_list = [
-            dI
-            for dI in os.listdir(lambda_code_dir_path)
-            if os.path.isdir(os.path.join(lambda_code_dir_path, dI))
-        ]
-        logger.debug(os.getcwd())
-        logger.debug(lambda_dir_list)
-        # zip it and move that to deployment_zip_dir
-        for each_lambda_dir in lambda_dir_list:
-            shutil.make_archive(
-                str(each_lambda_dir),
-                "zip",
-                os.path.join(lambda_code_dir_path, each_lambda_dir),
-            )
-            shutil.move(
-                str(each_lambda_dir) + ".zip",
-                os.path.join(os.getcwd(), deployment_zip_dir),
-            )
-
-        return
+def _extracted_from_make_zip_file_for_lambda_handler_(whole_ast_info, deployment_zip_dir):
     lambda_handler_module_dict: Dict[
         str, ast.Module
     ] = whole_ast_info.lambda_handler_module_dict
 
-    # Exception handling
-    if not lambda_handler_module_dict:
-        if os.path.exists(compiler_module_config.deployment_zip_dir):
-            os.system("rm -rf %s" % compiler_module_config.deployment_zip_dir)
-        return
-
-    # delete if exists and make directory
-    deployment_zip_dir = compiler_module_config.deployment_zip_dir
-    if os.path.exists(deployment_zip_dir):
-        os.system("rm -rf %s" % deployment_zip_dir)
-        os.makedirs(deployment_zip_dir)
-    else:
-        os.makedirs(deployment_zip_dir)
-
-    lambda_code_dir_path = compiler_module_config.lambda_code_dir_path
+    lambda_code_dir_path = (
+        make_lambda_zip_path(
+            deployment_zip_dir
+        )
+    )
+    logger.debug(lambda_code_dir_path)
 
     # find lambda handler list in lambda_code_dir_path
     lambda_dir_list = [
@@ -4476,7 +3917,8 @@ def make_zip_file_for_lambda_handler(whole_ast_info: WholeASTInfoClass) -> None:
         for dI in os.listdir(lambda_code_dir_path)
         if os.path.isdir(os.path.join(lambda_code_dir_path, dI))
     ]
-
+    logger.debug(os.getcwd())
+    logger.debug(lambda_dir_list)
     # zip it and move that to deployment_zip_dir
     for each_lambda_dir in lambda_dir_list:
         shutil.make_archive(
@@ -4485,8 +3927,38 @@ def make_zip_file_for_lambda_handler(whole_ast_info: WholeASTInfoClass) -> None:
             os.path.join(lambda_code_dir_path, each_lambda_dir),
         )
         shutil.move(
-            str(each_lambda_dir) + ".zip", os.path.join(os.getcwd(), deployment_zip_dir)
+            f"{str(each_lambda_dir)}.zip",
+            os.path.join(os.getcwd(), deployment_zip_dir),
         )
+
+
+def make_lambda_zip_path(deployment_zip_dir):
+    if os.path.exists(deployment_zip_dir):
+        os.system(f"rm -rf {deployment_zip_dir}")
+    os.makedirs(deployment_zip_dir)
+    return "./lambda_path"
+
+
+def make_zip_for_whole_app(deployment_zip_dir, whole_ast_info):
+    logger.info("[Offloading whole app] : Making only one zip")
+
+    lambda_dir = (
+        make_lambda_zip_path(
+            deployment_zip_dir
+        )
+    )
+    module_info = whole_ast_info.module_info_for_offloading_whole_app
+    lambda_name = module_info.lambda_name
+
+    # Zip code with modules
+    shutil.make_archive(
+        "lambda_handler", "zip", os.path.join(lambda_dir, lambda_name)
+    )
+    # Move zip file to deployment_zip_dir
+    shutil.move(
+        "lambda_handler" + ".zip", os.path.join(os.getcwd(), deployment_zip_dir)
+    )
+    logger.info("Zipped Module")
 
 
 def make_lambda_function_using_aws_cli(whole_ast_info: WholeASTInfoClass):
@@ -4499,7 +3971,7 @@ def make_lambda_function_using_aws_cli(whole_ast_info: WholeASTInfoClass):
         logger.info("[Offloading whole app] : Create only one lambda")
 
         # move to deployments zip folder for deploying zip file
-        os.chdir(compiler_module_config.deployment_zip_dir)
+        os.chdir("./compiler_module_config.deployment_zip_dir")
 
         # Source code name
         original_file_name = whole_ast_info.file_name
@@ -4520,8 +3992,8 @@ def make_lambda_function_using_aws_cli(whole_ast_info: WholeASTInfoClass):
         # sys.exit(getframeinfo(currentframe()))
         lambda_handler_name = "lambda_handler"
 
-        lambda_zip_name = lambda_handler_name + ".zip"
-        lambda_arn = "arn:aws:lambda:us-east-1:206135129663:function:" + lambda_name
+        lambda_zip_name = f"{lambda_handler_name}.zip"
+        lambda_arn = f"arn:aws:lambda:us-east-1:206135129663:function:{lambda_name}"
         # handler_name_in_lambda_console = ".".join(
         #     [lambda_handler_name, lambda_handler_name]
         # )
@@ -4554,14 +4026,14 @@ def make_lambda_function_using_aws_cli(whole_ast_info: WholeASTInfoClass):
 
         # Exception handling
         if not lambda_info_dict:
-            if os.path.exists(compiler_module_config.deployment_zip_dir):
-                os.system("rm -rf %s" % compiler_module_config.deployment_zip_dir)
+            if os.path.exists("./compiler_module_config.deployment_zip_dir"):
+                os.system('rm -rf ./compiler_module_config.deployment_zip_dir')
             return
 
         for lambda_name, lambda_info in lambda_info_dict.items():
 
             # move to deployments zip folder for deploying zip file
-            os.chdir(compiler_module_config.deployment_zip_dir)
+            os.chdir("./compiler_module_config.deployment_zip_dir")
 
             if isinstance(lambda_info, MergedCompilerGeneratedLambda):
                 logger.debug(whole_ast_info.lambda_deployment_zip_info)
@@ -4573,14 +4045,9 @@ def make_lambda_function_using_aws_cli(whole_ast_info: WholeASTInfoClass):
                 original_file_name = lambda_info.lambda_name_list
                 logger.debug(original_file_name)
                 lambda_name_for_creation = "_and_".join(original_file_name)
-                lambda_name_to_make = (
-                        "coco_image_processing_" + lambda_name_for_creation
-                )
-                lambda_zip_name = lambda_info.lambda_group_name + ".zip"
-                lambda_arn = (
-                        "arn:aws:lambda:us-east-1:206135129663:function:"
-                        + lambda_name_to_make
-                )
+                lambda_zip_name = f"{lambda_info.lambda_group_name}.zip"
+                lambda_name_to_make = f"coco_image_processing_{lambda_name_for_creation}"
+                lambda_arn = f"arn:aws:lambda:us-east-1:206135129663:function:{lambda_name_to_make}"
                 logger.debug(lambda_name_to_make)
 
                 lambda_deploy_info = LambdaDeployInfo(
@@ -4602,7 +4069,7 @@ def make_lambda_function_using_aws_cli(whole_ast_info: WholeASTInfoClass):
                 os.chdir("../../..")
                 # logger.debug(zip_file_name_in_s3_bucket)
                 # Fetch module and lambda name
-                # lambda_dir = compiler_module_config.lambda_code_dir_path
+                # lambda_dir = "./lambda_path"
                 # lambda_name = lambda_info.lambda_group_name
                 # logger.debug(lambda_name)
                 # sys.exit(getframeinfo(currentframe()))
@@ -4616,7 +4083,7 @@ def make_lambda_function_using_aws_cli(whole_ast_info: WholeASTInfoClass):
         if lambda_handler_module_dict:
 
             # move to deployments zip folder for deploying zip file
-            os.chdir(compiler_module_config.deployment_zip_dir)
+            os.chdir("./compiler_module_config.deployment_zip_dir")
 
             # lambda_handler_deploy_dict = defaultdict()
             lambda_handler_info: CompilerGeneratedLambda
@@ -4632,16 +4099,13 @@ def make_lambda_function_using_aws_cli(whole_ast_info: WholeASTInfoClass):
                 # logger.info(zip_file_name_in_s3_bucket)
                 # sys.exit(getframeinfo(currentframe()))
                 original_file_name = lambda_handler_info.original_func_name
-                lambda_name_to_make = "coco_image_processing_" + original_file_name
-                lambda_zip_name = lambda_handler_func_name + ".zip"
+                lambda_name_to_make = f"coco_image_processing_{original_file_name}"
+                lambda_zip_name = f"{lambda_handler_func_name}.zip"
+                lambda_arn = f"arn:aws:lambda:us-east-1:206135129663:function:{lambda_name_to_make}"
+
                 handler_name_in_lambda_console = ".".join(
                     [lambda_handler_func_name, lambda_handler_func_name]
                 )
-                lambda_arn = (
-                        "arn:aws:lambda:us-east-1:206135129663:function:"
-                        + lambda_name_to_make
-                )
-
                 # save it to LambdaDeploymentInfo
                 lambda_deploy_info = LambdaDeployInfo(
                     # lambda_name=lambda_handler_func_name,
@@ -4675,45 +4139,11 @@ def upload_upload_hybrid_code_to_s3hybrid_code_to_s3(whole_ast_info: WholeASTInf
     logger.info("Skipping since we aren't in dynamic phase")
     return
 
-    if whole_ast_info.offloading_whole_application:
-        logger.info("[Offloading whole app] : Skipping since not dynamic phase")
-        return
-
-    hybrid_code_dir = compiler_module_config.hybrid_code_dir
-    hybrid_code_file_name = compiler_module_config.hybrid_code_file_name
-    bucket_name = compiler_module_config.bucket_for_hybrid_code
-
-    # TODO : comment code in code
-    s3_client.upload_file(
-        os.path.join(hybrid_code_dir, hybrid_code_file_name + ".py"),
-        bucket_name,
-        f"{uuid.uuid4()}-{hybrid_code_file_name}.py",
-    )
-
-    logger.info("Uploading hybrid code to s3")
-
 
 def upload_hybrid_code_to_s3(whole_ast_info: WholeASTInfoClass):
     logger.info("Uploading hybrid code to s3")
     logger.info("Skipping since we aren't in dynamic phase")
     return
-
-    if whole_ast_info.offloading_whole_application:
-        logger.info("[Offloading whole app] : Skipping since not dynamic phase")
-        return
-
-    hybrid_code_dir = compiler_module_config.hybrid_code_dir
-    hybrid_code_file_name = compiler_module_config.hybrid_code_file_name
-    bucket_name = compiler_module_config.bucket_for_hybrid_code
-
-    # TODO : comment code in code
-    # s3_client.upload_file(
-    #     os.path.join(hybrid_code_dir, hybrid_code_file_name + ".py"),
-    #     bucket_name,
-    #     f"{uuid.uuid4()}-{hybrid_code_file_name}.py",
-    # )
-
-    logger.info("Uploading hybrid code to s3")
 
 
 def upload_lambda_deployment_to_s3(whole_ast_info: WholeASTInfoClass):
@@ -4722,20 +4152,10 @@ def upload_lambda_deployment_to_s3(whole_ast_info: WholeASTInfoClass):
         logger.info("[Offloading whole app] : Uploading one zip file")
 
     # Fetch deployment directory
-    deployment_dir = compiler_module_config.deployment_zip_dir
-    bucket_name = compiler_module_config.bucket_for_lambda_handler_zip
+    deployment_dir = "./compiler_module_config.deployment_zip_dir"
+    bucket_name = "./compiler_module_config.bucket_for_lambda_handler_zip"
 
-    # Remove all objects in bucket beforehand
-    # TODO : comment this for improving performance
-    # bucket = s3.Bucket(bucket_name)
-    # bucket.objects.all().delete()
-    # logger.info(f"Deleting all objects in {bucket_name} beforehand")
-
-    # find all zip files in directory
-    deploy_dir_list = []
-    for dI in os.listdir(deployment_dir):
-        deploy_dir_list.append(dI)
-
+    deploy_dir_list = list(os.listdir(deployment_dir))
     # logger.debug(deploy_dir_list)
     # sys.exit(getframeinfo(currentframe()))
 
@@ -4841,100 +4261,103 @@ def process_while_deployment(whole_info):
     insert_imports_in_lambda_code_folder(whole_info)  # Put library modules
     make_zip_file_for_lambda_handler(whole_info)
     upload_lambda_deployment_to_s3(whole_info)
-    make_lambda_function_using_aws_cli(whole_info)  # TODO : comment code in code
+    make_lambda_function_using_aws_cli(whole_info)
     map_func_to_func_arn(whole_info)
     write_hybrid_code(whole_info)
     save_hybrid_code_in_output_directory(whole_info)
-    upload_hybrid_code_to_s3(whole_info)  # TODO : comment code in code
+    upload_hybrid_code_to_s3(whole_info)
 
     logger.info("Finish offloading to Lambda")
-    pass
 
 
 def main():
-    benchmark_dir = "../BenchmarkApplication"
+    benchmark_directory = "../BenchmarkApplication"
     file_name: str = "image_processing_test.py"
-    logger.info("File is {}".format(file_name))
-    with open(os.path.join(benchmark_dir, file_name), "r") as original_code:
-        # Make whole info dataclass
-        whole_info = make_dataclass_that_contains_whole_info(original_code, file_name)
-        copied_module: ast.Module = whole_info.copied_module_for_analysis
+    logger.info(f"File is {file_name}")
+    with open(os.path.join(benchmark_directory, file_name), "r") as original_code:
+        process_compiler(original_code, file_name)
 
-        # Provide users with functions and let users choose rules for scaling policy
-        find_user_annotation_in_code(whole_info)
 
-        # Sort and group by lambda group for checking combine pragma
-        group_by_lambda_group_name(whole_info)
+def process_compiler(original_code, file_name):
+    # Make whole info dataclass
+    whole_info = make_dataclass_that_contains_whole_info(original_code, file_name)
+    copied_module: ast.Module = whole_info.copied_module_for_analysis
 
-        # From user annotation, make information for functions
-        # parse_info_for_functions(whole_info)
+    # Provide users with functions and let users choose rules for scaling policy
+    find_user_annotation_in_code(whole_info)
 
-        # Put User-Annotation pragma in functions
-        # put_pragma_in_functions(whole_info, copied_module)
+    # Sort and group by lambda group for checking combine pragma
+    group_by_lambda_group_name(whole_info)
 
-        # import and finding function (Decomposition)
-        code_analyzer = ImportAndFunctionAnalyzer(whole_info, compiler_module_config)
-        code_analyzer.visit(copied_module)
-        code_analyzer.start_analyzing()
+    # From user annotation, make information for functions
+    # parse_info_for_functions(whole_info)
 
-        # change function definition
-        make_lambda_based_function(whole_info)
+    # Put User-Annotation pragma in functions
+    # put_pragma_in_functions(whole_info, copied_module)
 
-        # logger.debug(
-        #     astor.to_source(whole_info.lambda_function_info["L1"].lambda_module)
-        # )
+    # import and finding function (Decomposition)
+    code_analyzer = ImportAndFunctionAnalyzer(whole_info, compiler_module_config)
+    code_analyzer.visit(copied_module)
+    code_analyzer.start_analyzing()
 
-        # function call orchestrator and change function call
-        function_call_orchestrator(whole_info)
+    # change function definition
+    make_lambda_based_function(whole_info)
 
-        # add some modules in lambda handler
-        add_using_s3_in_lambda_handler(whole_info)
+    # logger.debug(
+    #     astor.to_source(whole_info.lambda_function_info["L1"].lambda_module)
+    # )
 
-        # show_result(whole_info)
-        # sys.exit(getframeinfo(currentframe()))
+    # function call orchestrator and change function call
+    function_call_orchestrator(whole_info)
 
-        # show_result(whole_info)
-        # sys.exit(getframeinfo(currentframe()))
+    # add some modules in lambda handler
+    add_using_s3_in_lambda_handler(whole_info)
 
-        # Add using
-        make_module_for_lambda_handler(whole_info)
+    # show_result(whole_info)
+    # sys.exit(getframeinfo(currentframe()))
 
-        # make directory for each lambda handler
-        make_lambda_code_directory(whole_info)
+    # show_result(whole_info)
+    # sys.exit(getframeinfo(currentframe()))
 
-        # Put library modules in each lambda handler
-        insert_imports_in_lambda_code_folder(whole_info)
+    # Add using
+    make_module_for_lambda_handler(whole_info)
 
-        # show_result(whole_info)
-        # sys.exit(getframeinfo(currentframe()))
+    # make directory for each lambda handler
+    make_lambda_code_directory(whole_info)
 
-        # Zip library modules and code for deployment
-        make_zip_file_for_lambda_handler(whole_info)
+    # Put library modules in each lambda handler
+    insert_imports_in_lambda_code_folder(whole_info)
 
-        # show_result(whole_info)
-        # sys.exit(getframeinfo(currentframe()))
+    # show_result(whole_info)
+    # sys.exit(getframeinfo(currentframe()))
 
-        # Upload deployment list to s3
-        upload_lambda_deployment_to_s3(whole_info)
+    # Zip library modules and code for deployment
+    make_zip_file_for_lambda_handler(whole_info)
 
-        # Create lambda function using aws cli
-        make_lambda_function_using_aws_cli(whole_info)
+    # show_result(whole_info)
+    # sys.exit(getframeinfo(currentframe()))
 
-        # sys.exit(getframeinfo(currentframe()))
+    # Upload deployment list to s3
+    upload_lambda_deployment_to_s3(whole_info)
 
-        # Make object that contains mapping func_name to lambda_func_arn
-        map_func_to_func_arn(whole_info)
+    # Create lambda function using aws cli
+    make_lambda_function_using_aws_cli(whole_info)
 
-        # Making VM Hybrid
-        write_hybrid_code(whole_info)
+    # sys.exit(getframeinfo(currentframe()))
 
-        # Write hybrid code to output directory
-        save_hybrid_code_in_output_directory(whole_info)
+    # Make object that contains mapping func_name to lambda_func_arn
+    map_func_to_func_arn(whole_info)
 
-        # Upload Hybrid to S3
-        upload_hybrid_code_to_s3(whole_info)
+    # Making VM Hybrid
+    write_hybrid_code(whole_info)
 
-        logger.info("End of Compiler")
+    # Write hybrid code to output directory
+    save_hybrid_code_in_output_directory(whole_info)
+
+    # Upload Hybrid to S3
+    upload_hybrid_code_to_s3(whole_info)
+
+    logger.info("End of Compiler")
 
 
 if __name__ == "__main__":
