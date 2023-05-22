@@ -1,15 +1,12 @@
-import datetime
-import os
-import random
-import string
-import sys
-from concurrent.futures import ThreadPoolExecutor, wait
-from pathlib import Path
-from typing import Union, List
-
 import dataclasses
+import datetime
+import random
 import requests
+import string
+from concurrent.futures import ThreadPoolExecutor, wait
 from fastapi import FastAPI
+from pathlib import Path
+from typing import Union
 
 # Import OpenTelemetry and Logger modules
 from utils import utils
