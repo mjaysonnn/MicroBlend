@@ -1,48 +1,9 @@
-"""
-Run workload and scaling policy with compiler
-
-SYNOPSIS
-========
-::
-    python3 controller.py
-
-DESCRIPTION
-===========
-1. First find user pragma in function
-2. Open Initial Resources
-3. Start workload and scaling policy
-4. When provisioning, use compiler to make hybrid case if necessary
-
-ENVIRONMENT
-==========
-Do configuration before running workload
-
-    USE_CASE_FOR_EXPERIMENTS
-
-    LoadBalancer Configuration
-        AMI_ID
-        INSTANCE_WORKERS
-        WORKLOAD_CHOICE
-        NUMBER_OF_INSTANCES
-        CPU IDLE PERCENT
-        use_case_for_experiments
-
-    Module Configuration
-
-
-
-FILES
-=====
-1. Read csv in workload_folder
-2. Choose benchmark in benchmark folder
-
-"""
-
 import asyncio
+import base64
 import csv
 import datetime
 import glob
-import json
+import logging
 import logging.handlers
 import math
 import os
@@ -50,13 +11,18 @@ import pickle
 import sys
 import threading
 import time
+import urllib
+import urllib.parse
 import urllib.request
+import urllib.request
+import zlib
 from collections import defaultdict
-from dataclasses import dataclass, field
 from inspect import currentframe, getframeinfo
+from pathlib import Path
 from pprint import pformat
 from shutil import copyfile
-from typing import List, Optional
+from typing import List
+from typing import Optional
 
 import aiohttp
 import boto3
@@ -64,1782 +30,1189 @@ import numpy as np
 import paramiko
 import pytz
 import requests
+from aiohttp_retry import RetryClient, ExponentialRetry
+from botocore.exceptions import ClientError
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 
-# from Compiler import compiler_simplified
+sys.path.append('utils')
+from logger import init_logger, empty_log_file
+from general_config import ModuleConfiguration
+from vm_or_instance_info import InstanceInfoClass, InstanceInfoWithCPUClass, TerminatedInstanceInfoClass, \
+    return_microservices_that_involve_mongodb
+from compose_post_parameter_refactor import generate_input_for_compose_post_service
 
+from aws_key import CREDENTIALS
 
-"""
-Server Configuration 
-"""
+logger, result_log_with_dir = init_logger()
+empty_log_file()
 
-INSTANCE_TYPE = "c5.large"  # TODO : Change This
-# Instance Info
-NUMBER_OF_INSTANCES: int = 33  # TODO : Change This
+conf_dict = ModuleConfiguration()
 
-# LoadBalancer AMI
-BALANCER_EC2_IP: str = "3.239.118.123"  # TODO : Change This
-BALANCER_ID: str = "61b971a8d98b43110b163415"  # TODO : Change This
+# request & client settings
+s = requests.Session()
+retries = Retry(total=5, backoff_factor=1, status_forcelist=[502, 503, 504])
+s.mount('http://', HTTPAdapter(max_retries=retries))
 
-"""
-INPUT CSV 
-"""
+user_agent = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/51.0.2704.103 Safari/537.36"}
+headers = {**user_agent}
 
-# INPUT_CSV = "wuts.csv"  # TODO: Change This
-# INPUT_CSV = "stable_30_seconds.csv"
-INPUT_CSV = "wits_average_130_factor_3_minute_60.csv"
+# boto3 settings
 
-INPUT_FOLDER = "../WorkloadGenerator/WITS/"  # TODO: Change This
+ec2_client = boto3.client("ec2", region_name="us-east-1", **CREDENTIALS)
+lambda_client = boto3.client("lambda", region_name="us-east-1", **CREDENTIALS)
+cloudwatch_client = boto3.client("cloudwatch", **CREDENTIALS, region_name="us-east-1")
 
-MAX_REQUESTS_PER_SEC_PER_VM = 4  # TODO: Change This
-
-SLO_CRITERIA = 1000  # TODO: Change This
-
-# Server AMI
-AMI_ID = "ami-06a850866841c1c9f"  # TODO : Change This
-
-# Inference Types ======= # TODO: Change Workload
-WORKLOAD_CHOICE = {
-    "resnet18": "/resnet18/",
-    "resnet152": "/resnet152/",
-    "densenet": "/densenet/",
-    "feature_generate": "/feat_gen/",
-    "mat_mul": "/matmul/",
-}
-
-# User script for launching server AMI ===== # TODO: Change This
-USER_DATA_SCRIPT = """#!/bin/bash 
-    cd /home/ec2-user/MicroBlendServer
-    pip3 install pandas    
-    cd mat_mul
-    uvicorn fastapi_server_matmul:app --reload --host=0.0.0.0 --port=5000 &
-    """
-
-# CONFIGURATION
-USE_CASE_FOR_EXPERIMENT = "MicroBlend"  # TODO : Change This
-
-"""
-USE_CASE_FOR_EXPERIMENTS & WORKLOAD CONFIGURATION
-"""
-
-USE_CASE_FOR_EXPERIMENTS = ["ALL_VM", "OVERPROVISION",
-                            "COLD_START", "ALL_LAMBDA", "MICROBLEND",
-                            "TEST_FOR_1_MINUTE_VM", "TEST_FOR_1_MINUTE_LAMBDA"]
-
-requests.adapters.DEFAULT_RETRIES = 40
-
-NUMBER_OF_VIOLATION = 0
-VIOLATED_DURATIONS = []
-
-DURATION_LIST = []
-TOTAL_DURATION = 0
-
-REQUEST_TYPE = "vm"
-PROVISIONING_METHOD = "ONLY_VM"
-OVER_PROVISION = False
-
-# Index for stopping policy
-INDEX_FOR_STOPPING_SCALING_POLICY = False
-
-# Termination Policy - CPU IDLE PERCENT =====
-CPU_IDLE_PERCENT = 10
-
-if USE_CASE_FOR_EXPERIMENT in USE_CASE_FOR_EXPERIMENTS:
-    if USE_CASE_FOR_EXPERIMENT == "COLD_START":
-        INPUT_CSV = "cold_start.csv"
-        REQUEST_TYPE = "lambda"
-
-        # PROVISIONING_METHOD = "ONLY_VM"
-        # OVER_PROVISION = False
-        INDEX_FOR_STOPPING_SCALING_POLICY = True
-
-    elif USE_CASE_FOR_EXPERIMENT == "ALL_VM":
-        REQUEST_TYPE = "vm"
-        PROVISIONING_METHOD = "ONLY_VM"
-        OVER_PROVISION = False
-
-    elif USE_CASE_FOR_EXPERIMENT == "OVERPROVISION":
-        REQUEST_TYPE = "vm"
-        PROVISIONING_METHOD = "ONLY_VM"
-        OVER_PROVISION = True
-
-    elif USE_CASE_FOR_EXPERIMENT == "ALL_LAMBDA":
-        REQUEST_TYPE = "lambda"
-        INDEX_FOR_STOPPING_SCALING_POLICY = True
-
-    elif USE_CASE_FOR_EXPERIMENT == "MICROBLEND":
-        REQUEST_TYPE = "vm"
-        PROVISIONING_METHOD = "Hybrid"
-        OVER_PROVISION = False
-
-    elif USE_CASE_FOR_EXPERIMENT == "TEST_FOR_1_MINUTE_LAMBDA":
-        INPUT_CSV = "stable_1_minutes.csv"
-        REQUEST_TYPE = "lambda"
-        PROVISIONING_METHOD = "HYBRID"
-        OVER_PROVISION = False
-        INDEX_FOR_STOPPING_SCALING_POLICY = True
-
-    elif USE_CASE_FOR_EXPERIMENT == "TEST_FOR_1_MINUTE_VM":
-        INPUT_CSV = "stable_1_minutes.csv"
-        REQUEST_TYPE = "vm"
-        PROVISIONING_METHOD = "ONLY_VM"
-        OVER_PROVISION = False
-        INDEX_FOR_STOPPING_SCALING_POLICY = True
-else:
-    print("Wrong use case input")
-    sys.exit(1)
-
-"""
-NGINX LoadBalancer Configuration
-"""
-
-SECURITY_GROUP = "sg-0ee3256ff0154c3d0"
-KEY_NAME = "mjay_m1"
-
-# INPUT CSV WITH DIRECTORY =======
-INPUT_CSV_WITH_DIR = os.path.join(INPUT_FOLDER, INPUT_CSV)
-
-# RESULT LOG NAMING =====
-
-RESULT_LOG_NAME = None
-
-if REQUEST_TYPE == "lambda":
-    RESULT_LOG_NAME = f"{INPUT_CSV.split('.')[0]}_{REQUEST_TYPE}"
-
-elif REQUEST_TYPE == "vm":
-    if PROVISIONING_METHOD == "Hybrid":
-        RESULT_LOG_NAME = (
-            f"{INPUT_CSV.split('.')[0]}_microblend"
-        )
-
-    elif OVER_PROVISION:
-        RESULT_LOG_NAME = (
-            f"{INPUT_CSV.split('.')[0]}_"
-            f"{REQUEST_TYPE}_"
-            f"{PROVISIONING_METHOD.lower()}_over_provision"
-        )
-    else:
-        RESULT_LOG_NAME = (
-            f'{INPUT_CSV.split(".")[0]}_'
-            f"{REQUEST_TYPE}"
-            # f"_{PROVISIONING_METHOD.lower()}"
-            f"_no_over_provision"
-        )
-
-# For saving instance workers =====
-# INSTANCE_WORKERS = []
+# Semaphore for adding ec2 info
 instance_workers_lock = threading.Lock()
 
-# Save autoscaling index and running time =====
+# Instance Information
+whole_instance_info = defaultdict(InstanceInfoClass)
+worker_list_in_lbs = []
+instance_list_in_lbs = []
+ec2_private_ip = []
+instance_to_worker = {}
 
-# Exclude installing for performance
-# pip3 install -r requirements.txt
+# Keep track of terminated instance info for cost analysis
+data_to_save_in_pickle = {
+    "whole_instance_info": whole_instance_info,
+    "instance_list_in_lbs": instance_list_in_lbs,
+    "worker_list_in_lbs": worker_list_in_lbs,
+    "ec2_private_ip": ec2_private_ip,
+    "instance_to_worker": instance_to_worker
+}
 
+# List of initial instances or instances from the past 1 minute
+initial_or_recent_instances = []
 
-# AWS CREDENTIALS =======
-CREDENTIALS = {}
+# Dictionary to keep track of terminated instance information
+terminated_instance_info = defaultdict(InstanceInfoClass)
 
+# Load balancer information
+lb_addr = conf_dict.external_lb_config.get("external-loadbalancer-addr")
+lb_port = conf_dict.external_lb_config.get("external-loadbalancer-port")
 
-@dataclass
-class InstanceInfoWithCPUClass:
-    inst_id: str
-    cpu_util: float
+# Info about requests
+duration_info = {
+    "total_requests": 0,
+    "accumulated_request_list_every_minute": [0],
+    "duration_list": [],
+    "lambda_duration_list": [],
+    "duration_in_seconds": 0,
+    "violated_duration_list": [],
+    "number_of_violation_from_lambda": 0,
+    "number_of_violation": 0
+}
 
+# Index for stopping policy
+index_for_stopping_scaling_policy = False
+provisioning_method = "vm"
+request_type = "vm"
 
-@dataclass
-class LoadBalancerConfigClass:
-    # Instance Configuration
-    instance_type: str = INSTANCE_TYPE
-    init_number_of_instance: int = NUMBER_OF_INSTANCES
-    security_groups: str = SECURITY_GROUP
-    snid: str = "subnet-dd8dffd1"
-    region_name: str = "us-east-1"
-    snid_az: str = "us-east-1f"
-    cost_per_hour: float = 0.096
-    key_name: str = KEY_NAME
-    max_requests_per_sec_per_vm: str = MAX_REQUESTS_PER_SEC_PER_VM
-
-    # Server AMI ID
-    image_id: str = AMI_ID
-
-    # LoadBalancer Configuration
-    balancer_ip_addr: str = BALANCER_EC2_IP
-    balancer_id: str = BALANCER_ID
-    balancer_ip_addr_with_port: str = balancer_ip_addr + ":26590"
-    balancer_label: str = "LoadBalancer"
-    basic_status_url: str = "/basic_status"
-
-    # Workload Configuration
-    input_csv: str = INPUT_CSV_WITH_DIR
-    workload_scaling_factor: int = 1
-
-    # Scaling Policy Configuration
-    duration: int = 60
-
-    # default_weight: int = 1
-    # baseline: int = 80
-    # avail_zone: str = ""
-    # logfile: str = ""
+# Lambda ARN info
+lambda_arn_list_for_mongodb = return_microservices_that_involve_mongodb()
 
 
-@dataclass
-class ModuleConfigClass:
-    # File Name
-    f_name: str = "resnet18_vm_for_test.py"
+def configure_experiment_variables():
+    """Configure experiment variables"""
+    global index_for_stopping_scaling_policy, provisioning_method
 
-    # Workload Result Log
-    result_logfile_folder: str = "../Log/Result"
-    result_logfile_name: str = "../Log/Result/microblend_result.log"
+    experiment_case = conf_dict.experiment_info.get("experiment_case")
+    trace_input = conf_dict.experiment_info.get("trace_input")
+    request_handle_type = 'vm'
+    over_provision = False
+    result_file_name = None
+    index_for_stopping_scaling_policy = False
 
-    worker_log_folder: str = "../Log/Worker"
-    worker_log_file: str = "../Log/Worker/workers.json"
+    experiment_case_list = ["all_vm", "all_lambda", "overprovision", "microblend", "test_vm", "test_lambda"]
 
-    pickle_file: str = "../Log/Pickle/vm_instance.pkl"
+    if experiment_case not in experiment_case_list:
+        logger.info("Wrong use case input")
+        sys.exit(1)
 
-    # Compiler Result Log
-    bench_dir: str = "../BenchmarkApplication/resnet18"
-    module_dir: str = "import_modules"
-    output_path_dir: str = "output"
-    lambda_code_dir_path: str = output_path_dir + "/lambda_codes"
-    deployment_zip_dir: str = output_path_dir + "/deployment_zip_dir"
-    hybrid_code_dir: str = output_path_dir + "/hybrid_vm"
-    hybrid_code_file_name: str = "compiler_generated_hybrid_code"
-    bucket_for_hybrid_code: str = "coco-hybrid-bucket-mj"
-    bucket_for_lambda_handler_zip: str = "faas-code-deployment-bucket"
-    # log_folder_dir: str = "coco-hybrid-bucket"
+    if experiment_case == "overprovision":
+        over_provision = True
+        result_file_name = f"{trace_input.split('.')[0]}_over_provision"
 
+    elif experiment_case == "all_lambda":
+        request_handle_type = "lambda"
 
-# Fetch Compiler module configuration
-module_conf = ModuleConfigClass()
+    elif experiment_case == "microblend":
+        provisioning_method = "microblend"
+        result_file_name = f"{trace_input.split('.')[0]}_microblend"
 
-# Fetch Load Balancer Config
-lb_conf = LoadBalancerConfigClass()
-s_factor = lb_conf.workload_scaling_factor
-lb_ip = lb_conf.balancer_ip_addr
+    result_file_name = result_file_name or f"{trace_input.split('.')[0]}_{request_handle_type}"
+    logger.info("Result log file name to save : {}".format(result_file_name))
+    logger.info(f"Experiment Case : {experiment_case}")
 
+    if experiment_case == "microblend":
+        logger.info(f"Initial Request Type : '{request_handle_type}' -> using 'lambda' while provisioning")
+    else:
+        logger.info(f"Request Type : {request_handle_type}\n")
 
-def return_logger():
-    # Logging Configuration
-    modules_for_removing_debug = [
-        "urllib3",
-        "s3transfer",
-        "boto3",
-        "botocore",
-        "urllib3",
-        "requests",
-        "paramiko",
-    ]
-    for name in modules_for_removing_debug:
-        logging.getLogger(name).setLevel(logging.CRITICAL)
-    log_inst = logging.getLogger(__name__)
-    log_format = logging.Formatter("%(asctime)s [%(levelname)-6s] [%(funcName)-58s:%(lineno)-4s]  %(" "message)s")
-    # File Handler
-    file_handler = logging.FileHandler(module_conf.result_logfile_name)
-    file_handler.setFormatter(log_format)
-    log_inst.addHandler(file_handler)
-
-    # Console Handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(log_format)
-    log_inst.addHandler(console_handler)
-    # SET LEVEL
-    log_inst.setLevel(logging.DEBUG)
-
-    return log_inst
+    return result_file_name
 
 
-# Not Using this for now
-@dataclass
-class FunctionRules:
-    cpu_util: float = 40
-    cpu_util_default_boolean = True
-    cpu_operator: str = "ge"
-
-    memory_util: float = 30
-    memory_util_default_boolean = True
-    memory_operator: str = "ge"
-
-    arrival_rate: int = 5
-    arrival_rate_default_boolean = True
-    arrival_rate_operator: str = "ge"
-
-
-@dataclass
-class FunctionWithServiceCandidate:
-    service_candidate: str
-    rules_for_scaling_policy: dict = field(default_factory=defaultdict)
-
-
-@dataclass
-class ScalingPolicyMetric:
-    arrival_rate: float = None
-    cpu_util: float = None
-    memory_util: float = None
-
-
-def get_initial_request() -> int:
-    """Get starting number of requests
-    :return: Starting number
+def encode_native_object(obj):
     """
-    logger.info("Get Initial Request")
+    Encode a Python object using pickle, zlib, and base64.
 
-    lb_ip_addr = lb_conf.balancer_ip_addr
-    basic_status = lb_conf.basic_status_url
-    url_to_request = "http://" + lb_ip_addr + basic_status
+    Args:
+        obj: A Python object.
 
-    with requests.Session() as s:
-        try:
-            number_res = s.get(url_to_request, timeout=5)
-            res_text = number_res.text.split()
-
-        except (
-                requests.exceptions.ConnectTimeout,
-                requests.exceptions.ConnectionError,
-        ) as e:
-            logger.info(f"Exception :{e}")
-            logger.info("No Load Balancer running or Wrong IP Address")
-            logger.info("Setting request to 0")
-            return 0
-        else:
-            assert number_res.status_code == 200
-            prev_request = int(res_text[res_text.index("Reading:") - 1])
-            logger.info(f"\tstarting request is {prev_request}")
-            return prev_request
-
-
-def empty_result_log():
-    """Empty microblend_result.log
-    :return: None
+    Returns:
+        A string containing the encoded object.
     """
-    logger.info("Empty microblend_result.log beforehand")
-    open(module_conf.result_logfile_name, "w").close()
-    assert os.path.getsize(module_conf.result_logfile_name) == 0
+    obj = pickle.dumps(obj)
+    obj = zlib.compress(obj)
+    obj = base64.b64encode(obj).decode().replace('/', '*')
+    return obj
 
 
-def make_all_workers_unavailable(initial_work_id_list: List[Optional[str]] = None):
+def decode_native_object(encoded_obj):
     """
-    Iterate through worker configuration and make each worker in lb unavailable
+    Decode a string containing a Python object encoded using `encode_native_object()`.
+
+    Args:
+        encoded_obj: A string containing the encoded object.
+
+    Returns:
+        The decoded Python object.
     """
-    logger.info("Make previous workers unavailable")
+    encoded_obj = encoded_obj.replace('*', '/')
+    encoded_obj = base64.b64decode(encoded_obj)
+    encoded_obj = zlib.decompress(encoded_obj)
+    decoded_obj = pickle.loads(encoded_obj)
+    return decoded_obj
 
-    # If empty make a empty list
-    if initial_work_id_list is None:
-        initial_work_id_list = []
 
-    # List worker json file list
-    os.chdir("..")  # move to parent directory
+# Configure Experiment Variables
+result_log_file_name = configure_experiment_variables()
 
-    # Fetch all worker files -> will be used for removing except original files
-    w_folder = "Log/Worker"
-    w_file_format = "workers"
-    original_log_file_name = "workers.json"
-    worker_file_list = glob.glob(f"{w_folder}/{w_file_format}*.json")
-    logger.info(f'\tWorker Files are {worker_file_list}')
+# Empty result, loadbalancer log
+empty_log_file()
 
-    # Connect to LB and fetch worker_id
-    html_page = urllib.request.urlopen(f"http://{lb_conf.balancer_ip_addr}:26590/balancers/{lb_conf.balancer_id}")
-    soup = BeautifulSoup(html_page, "html.parser")
+
+def disable_workers_in_loadcat(initial_work_id_list: Optional[list] = None):
+    """
+    Make all workers unavailable in all microservice load_balancers
+    """
+    logger.info("Make servers unavailable in loadcat")
+
+    initial_work_id_list = initial_work_id_list or []
+
+    # Get LoadBalancer configuration
+    loadbalancer_addr = conf_dict.external_lb_config.get("loadbalancer-addr")
+    logger.debug(f"loadbalancer_addr : {loadbalancer_addr}")
+    lb_id = conf_dict.external_lb_config.get("loadbalancer_id")
+
+    # Fetch worker IDs from servers and exclude initial_work_id_list
+    url_to_request = f"http://{loadbalancer_addr}:26590/balancers/{lb_id}"
+    # logger.debug(f"URL to request: {url_to_request} (Loadcat)")
+
     worker_id_list_from_lb = []
-    for link in soup.findAll('a'):
-        if str(link.get('href')).startswith('/servers/'):
-            split_href = str(link.get('href')).split("/")
-            for i, c in enumerate(split_href):
-                if c == "servers":
+    try:
+        html_page = urllib.request.urlopen(url_to_request, timeout=15)
+        time.sleep(0.01)
+    except Exception as exc:
+        logging.error(f"{exc} happened for {url_to_request}")
+    else:
+        soup = BeautifulSoup(html_page, "html.parser")
+        for link in soup.findAll('a'):
+            if str(link.get('href')).startswith('/servers/'):
+                split_href = str(link.get('href')).split("/")
+                for i, c in enumerate(split_href):
+                    if c == "servers":
+                        if split_href[i + 1] not in initial_work_id_list:
+                            worker_id_list_from_lb.append(split_href[i + 1])
 
-                    # logger.debug(split_href)
-                    # Skip Initial Worker Id
+    # logger.debug(f"worker_id_list_from_lb : {worker_id_list_from_lb}")
 
-                    if split_href[i + 1] not in initial_work_id_list:
-                        worker_id_list_from_lb.append(split_href[i + 1])
+    # Make data for every worker ID
+    worker_info_dict = {each_worker: {
+        "settings.address": "0.0.0.0",
+        "settings.weight": 1,
+        "settings.availability": "unavailable",
+        "label": each_worker + "_unused",
+    } for each_worker in worker_id_list_from_lb if each_worker not in initial_work_id_list}
 
-    # logger.info(f"worker_file_list : {worker_id_list_from_lb}")
-    # logger.info(f"len(worker_file_list) : {len(worker_id_list_from_lb)}")
+    # POST Method to make them unavailable
+    for each_worker_url, worker_data in worker_info_dict.items():
+        url_to_append = f"/servers/{each_worker_url}/edit"
+        url_for_editing_server = f"http://{loadbalancer_addr}:26590{url_to_append}"
+        s.post(url_for_editing_server, worker_data, headers=user_agent)
+        time.sleep(0.01)
 
-    # Make dummy dictionary except initial worker id list
-    worker_dict = defaultdict()
-    for each_worker in worker_id_list_from_lb:
-        data = defaultdict()
-        worker_id = each_worker
-        data["settings.address"] = ("0.0.0.0" + ":" + str(5000))
-        data["settings.weight"] = 1
-        data["settings.availability"] = "unavailable"
-        data["settings.vmtype"] = "ondemand"
-        data["label"] = "previous_one" + "_unused"
-        worker_dict[worker_id] = data
-
-    # worker_dict = make_worker_list_info(worker_file_list)
-
-    # logger.debug(f"\t\t Worker Dict is {pformat(worker_dict)}")
-
-    # Do request and make workers unavailable
-    make_servers_unavailable(worker_dict),  # sys.exit(getframeinfo(currentframe()))
-
-    # Remove worker log except worker.json
-    for each_worker_json in worker_file_list:
-        original_f_name = os.path.join(w_folder, original_log_file_name)
-
-        if original_f_name in each_worker_json:  # Original File
-            logger.info(f"\tEmpty and Skip original log")
-            open(original_f_name, "w").close()
-            assert os.path.getsize(original_f_name) == 0
-            continue
-        else:
-            os.remove(each_worker_json)
-            logger.debug(f"\t\tDeleted {each_worker_json}")
-
-    os.chdir("Controller")
-    # logger.debug(os.getcwd())
-    logger.info("\tFinished making all workers unavailable")
-
-
-def make_servers_unavailable(worker_info_dict):
-    """Make all previous servers unavailable except initial servers
-
-    :param worker_info_dict: worker id with label
-    :return: None
-    """
-    if worker_info_dict is None:
-        return
-
-    logger.info("\tMake each server unavailable")
-
-    exception_str = (
-        "Inconsistency with loadbalancer configuration "
-        "-> remove or overwrite json file"
-    )
-
-    # logger.debug(f"\t{worker_info_dict}")
-    # logger.debug(f"\t{worker_ids}")
-
-    if worker_info_dict:
-        for each_worker_url, worker_data in worker_info_dict.items():
-
-            # logger.debug(each_worker_url)
-            # logger.debug(worker_data)
-
-            if each_worker_url is None:
-                logger.info("\tSkipping since each_worker_url is None")
-                continue
-
-            # if each_worker_url in worker_ids:
-            #     logger.info(f"\tSkip Initial Worker - {each_worker_url}")
-            #     continue
-
-            else:
-                post_request_to_make_server_unavailable(each_worker_url, exception_str, worker_data)
-
-
-def post_request_to_make_server_unavailable(
-        each_worker_url, exception_str, worker_data
-):
-    # logger.debug(each_worker_url)
-    uri = "/servers/" + each_worker_url + "/edit"
-    url = lb_conf.balancer_ip_addr_with_port + uri
-
-    with requests.session() as sess:
-
-        try:
-            res = sess.post(url="http://" + url, timeout=3, data=worker_data)
-
-        except TimeoutError as e:
-            logger.info(f"\t Exception {e} -> due to previous one")
-
-        except requests.exceptions.ConnectionError as error:
-            logger.info(f"Exception -> {error}")
-            logger.info(f"\t\t{exception_str}")
-
-        except requests.exceptions.ReadTimeout:
-            logger.info("\tMove on the next server")
-
-        else:
-            assert res.status_code == 200
-            # logger.info(worker_data.get("label"))
-
-
-def make_worker_list_info(workers_info_list):
-    workers_dict_info = defaultdict()
-
-    logger.info("\tFetch Worker Info from each worker log")
-
-    for worker_file in workers_info_list:
-
-        # logger.debug(worker_file)
-
-        if os.stat(worker_file).st_size != 0:
-            # logger.debug("open")
-
-            with open(worker_file) as json_file:
-                json_data = json.load(json_file)
-                # logger.debug(json_data)
-                make_unavailable_label_for_each_server(json_data, workers_dict_info)
-    # logger.debug(workers_dict_info)
-
-    return workers_dict_info
-
-
-def make_unavailable_label_for_each_server(json_data, worker_info_dict):
-    # logger.info("Make Unavailable Label for each worker")
-
-    for _, instance_info_list in json_data.items():
-
-        inst_info: dict
-        for inst_info in instance_info_list:
-            data = defaultdict()
-            worker_id = inst_info.get('worker_id')
-            data["settings.address"] = (inst_info.get("instance_ip") + ":" + str(5000))
-            data["settings.weight"] = 1
-            data["settings.availability"] = "unavailable"
-            data["settings.vmtype"] = "ondemand"
-            data["label"] = inst_info.get("instance_id") + "_unused"
-            worker_info_dict[worker_id] = data
-
-
-def terminate_instance(instance_id, region_name="us-east-1"):
-    client = boto3.client("ec2", region_name=region_name, **CREDENTIALS)
-    client.terminate_instances(InstanceIds=[instance_id])
-    logger.info(f"\tTerminating instance - {instance_id}")
+    logger.info("Finished making workers in loadcat unavailable\n")
 
 
 def terminate_previous_instances(inst_id_list=None):
-    """Terminate instance before experiment -> emtpy worker_log_file
     """
-    if inst_id_list is None:
-        inst_id_list = []
+    Terminate previous instances
+    """
+    logger.info("Start terminating previous instances")
 
-    logger.info("Terminate previous instances")
-
-    client = boto3.client("ec2", **CREDENTIALS, region_name="us-east-1")
+    server_tag_name = conf_dict.server_config.get("tag_name")
+    inst_id_list = inst_id_list or []
 
     custom_filter = [
-        {"Name": "tag:Name", "Values": ["ServerForApplication-MJ"]},
+        {"Name": "tag:Name", "Values": [server_tag_name]},
         {"Name": "instance-state-name", "Values": ["running"]},
     ]
 
-    response = client.describe_instances(Filters=custom_filter)
     try:
+        response = ec2_client.describe_instances(Filters=custom_filter)
         for res in response["Reservations"]:
             for i in res["Instances"]:
                 each_inst_id = i["InstanceId"]
-
-                if not inst_id_list:
-                    terminate_instance(each_inst_id, "us-east-1")
+                if each_inst_id in inst_id_list:
+                    logger.info(f"\tSkip Initial Instance - {each_inst_id}")
+                    continue
                 else:
-                    if each_inst_id in inst_id_list:
-                        logger.info(f"\tSkip Initial Instance - {each_inst_id}")
-                        continue
-
+                    terminate_instance(each_inst_id)
         if not response["Reservations"]:
-            raise ValueError
-
-    except ValueError:
-        logger.info('\tNo instances of "ServerApplication" running')
-
-    finally:
-        logger.info("\tFinished terminating instances beforehand")
+            raise ValueError(f"No instances of {server_tag_name} running")
+    except Exception as e:
+        logger.info(f'\t{e}')
+    else:
+        logger.info("Finished terminating instances beforehand\n")
 
 
-def remove_contents_in_worker_log():
-    logger.info("\tRemoving log file before experiment")
-    try:
-        open(module_conf.worker_log_file, "w").close()
-        logger.info("\tRemoved contents in worker.json beforehand")
-
-    except FileNotFoundError:
-        logger.info(f"\t{module_conf.worker_log_file} Not Found ")
+def terminate_instance(instance_id):
+    """
+    terminate instances with ec2_id
+    """
+    global ec2_client, logger
+    ec2_client.terminate_instances(InstanceIds=[instance_id])
+    logger.info(f"\tTerminating instance - {instance_id}")
 
 
 def create_instance(num, instance_type, image_id, security_g, snid, key_name):
+    server_tag_name = conf_dict.server_config.get("tag_name")
     ec2 = boto3.resource("ec2", region_name="us-east-1", **CREDENTIALS)
-    instance = ec2.create_instances(
-        ImageId=image_id,
-        InstanceType=instance_type,
-        KeyName=key_name,
-        MaxCount=num,
-        MinCount=1,
-        Monitoring={"Enabled": True},
-        # Placement={
-        #     'AvailabilityZone': avail_zone,
-        # },
-        SecurityGroupIds=[security_g],
-        SubnetId=snid,
-        DisableApiTermination=False,
-        InstanceInitiatedShutdownBehavior="stop",
-        UserData=USER_DATA_SCRIPT,
-        TagSpecifications=[
-            {
-                "ResourceType": "instance",
-                "Tags": [{"Key": "Name", "Value": "ServerForApplication-MJ"}],
-            },
-        ],
-    )
-
+    # create instance from boto3 session
+    instance = ec2.create_instances(ImageId=image_id,
+                                    InstanceType=instance_type,
+                                    KeyName=key_name,
+                                    MaxCount=num,
+                                    MinCount=1,
+                                    Monitoring={"Enabled": True},
+                                    SecurityGroupIds=[security_g],
+                                    DisableApiTermination=False,
+                                    InstanceInitiatedShutdownBehavior="stop",
+                                    TagSpecifications=[{"ResourceType": "instance",
+                                                        "Tags": [{"Key": "Name", "Value": server_tag_name}]}])
     return [instance[i].instance_id for i in range(len(instance))]
 
 
-def update_worker_attribute(
-        balancer_ip_addr_with_port,
-        vm,
-        worker_id,
-        attr_dict: dict = None,
-        new_resource=False,
-        hybrid_code=False,
-        offload_worker=False,
-        get_back_to_original_worker=False,
-        remove_worker=False,
-):
-    def get_uri_for_edit(w_id):
-        uri = "/servers/" + w_id + "/edit"
-        url = "http://" + balancer_ip_addr_with_port + uri
-        return url
+def launch_ec2_and_add_to_loadbalancer(num_of_workers_to_add=0, init_phase=False):
+    """Spawn EC2 instances and add them to load balancers (external/internal)"""
+    global whole_instance_info, instance_list_in_lbs
 
-    if attr_dict is None:
-        attr_dict = {}
+    logger.info("Start Spawn EC2 and Add them to LoadBalancer")
 
-    # When initialing resource -> vm : available, hybrid_code - backup
-    if new_resource:
-        address_for_editing = get_uri_for_edit(worker_id)
-        info_for_server = attr_dict
+    num_of_instances = conf_dict.server_config.get("init_number_of_instances") if init_phase else num_of_workers_to_add
+    logger.info(f"Requesting {num_of_instances} instances")
 
-        if hybrid_code:
-            info_for_server["label"] = vm.get_instance_id() + "_5001"
-        else:
-            info_for_server["label"] = vm.get_instance_id() + "_5000"
+    inst_id_list_to_launch = create_instance(
+        num=int(num_of_instances),
+        instance_type=conf_dict.server_config.get("instance_type"),
+        image_id=conf_dict.server_config.get("ami_id"),
+        snid=conf_dict.server_config.get("subnet_id"),
+        security_g=conf_dict.server_config.get("security_group"),
+        key_name=conf_dict.server_config.get("key_name")
+    )
 
-        info_for_server["settings.vmtype"] = "ondemand"
-        info_for_server["settings.weight"] = vm.get_weight()
-        response = requests.post(url=address_for_editing, data=info_for_server)
-        assert response.status_code == 200
-        vm.add_data_to_data_per_flask_id(dict(info_for_server))
+    logger.info("Start adding EC2 instances to LoadBalancers")
 
-        # 0 is vm , 1 is hybrid
-    elif offload_worker:
+    logger.info(f"Instances to launch: {inst_id_list_to_launch}")
 
-        address_for_editing = get_uri_for_edit(vm.return_worker_id_list()[1])  # address_for_editing for server with VM
-        info_for_server = vm.get_data_per_flask_id()[1]
-        info_for_server["settings.availability"] = ["available"]  # make vm unavailable
-        response = requests.post(url=address_for_editing, data=info_for_server)
-        assert response.status_code == 200
+    if index_for_stopping_scaling_policy:
+        logger.info("Not adding instance info since workload ended [Ended Policy]\n")
+        return
 
-        address_for_editing = get_uri_for_edit(vm.return_worker_id_list()[0])  # address_for_editing for server with VM
-        info_for_server = vm.get_data_per_flask_id()[0]
-        info_for_server["settings.availability"] = ["unavailable"]  # make vm unavailable
-        response = requests.post(url=address_for_editing, data=info_for_server)
-        assert response.status_code == 200
+    # Add instances to LB concurrently
+    threads = []
+    for inst_id in inst_id_list_to_launch:
+        instance_list_in_lbs.append(inst_id)
+        each_thread = threading.Thread(target=add_instance_to_lb, args=[inst_id, init_phase])
+        threads.append(each_thread)
+        each_thread.start()
 
-    elif get_back_to_original_worker:
-        address_for_editing = get_uri_for_edit(vm.return_worker_id_list()[0])  # address_for_editing for server with VM
-        info_for_server = vm.get_data_per_flask_id()[0]
-        info_for_server["settings.availability"] = ["available"]  # make vm unavailable
-        response = requests.post(url=address_for_editing, data=info_for_server)
-        assert response.status_code == 200
+    for thread in threads:
+        thread.join()
 
-        address_for_editing = get_uri_for_edit(
-            vm.return_worker_id_list()[1]
-        )  # address_for_editing for server with VM
-        info_for_server = vm.get_data_per_flask_id()[0]
-        info_for_server["settings.availability"] = ["unavailable"]  # make vm unavailable
-        response = requests.post(url=address_for_editing, data=info_for_server)
-        assert response.status_code == 200
-
-    elif remove_worker:
-        address_for_editing = get_uri_for_edit(vm.worker_id)
-        # address_for_editing = get_uri_for_edit(worker_id)
-
-        # First Backup for finishing existing application
-        info_for_server = vm.get_data_per_flask_id()[0]
-        info_for_server["settings.availability"] = ["backup"]  # make vm
-        response = requests.post(url=address_for_editing, data=info_for_server)
-        assert response.status_code == 200
-
-        # Give time to finish existing application
-        time.sleep(5)
-
-        # Unavailable
-        info_for_server = vm.get_data_per_flask_id()[0]
-        info_for_server["settings.availability"] = ["unavailable"]
-        response = requests.post(url=address_for_editing, data=info_for_server)
-        assert response.status_code == 200
+    logger.info(f"Finished launching and adding {len(inst_id_list_to_launch)} instances to LoadBalancers\n")
 
 
 class VM:
-    def __init__(self, instance_id):
-        self.instance_id = instance_id
-        self.instance_ip = self.get_instance_ip()  # 172.31.90.171
-        self.worker_id = None
-        self.vmtype = "ondemand"
-        self.weight = 1
-        self.worker_id_list = []
-        self.data_per_worker_id = []
+    """
+    A class representing an EC2 virtual machine instance.
+    """
 
-    def set_weight(self, weight):
+    def __init__(self, instance_id: str) -> None:
+        """
+        Initializes a new instance of the VM class.
+
+        Args:
+            instance_id (str): The EC2 instance ID.
+        """
+        self.instance_id: str = instance_id
+        self.instance_ip: str = self.get_instance_private_ip() if instance_id != "test" else "test"
+        self.weight: int = 1
+        self.loadcat_data: defaultdict = defaultdict(dict)
+
+    def set_weight(self, weight: int) -> None:
+        """
+        Sets the weight of the VM.
+
+        Args:
+            weight (int): The weight to set.
+        """
         self.weight = weight
 
-    def get_weight(self):
+    def get_weight(self) -> int:
+        """
+        Returns the weight of the VM.
+
+        Returns:
+            int: The weight of the VM.
+        """
         return self.weight
 
-    def get_instance_id(self):
+    def get_instance_id(self) -> str:
+        """
+        Returns the EC2 instance ID.
+
+        Returns:
+            str: The EC2 instance ID.
+        """
         return self.instance_id
 
-    def add_to_worker_id_list(self, worker_id):
-        self.worker_id_list.append(worker_id)
-
-    def return_worker_id_list(self):
-        return self.worker_id_list
-
-    def add_data_to_data_per_flask_id(self, data_dict):
-        self.data_per_worker_id.append(data_dict)
-
-    def get_data_per_flask_id(self):
-        return self.data_per_worker_id
-
-    def set_worker_id(self, worker_id):
-        self.worker_id = worker_id
-
-    def get_worker_id(self):
-        return self.worker_id
-
-    def set_instance_type(self, vmtype):
-        self.vmtype = vmtype
-
-    def get_instance_ip(self, ip_type="PrivateIpAddress"):
+    def add_loadcat_data(self, data_dict: dict) -> None:
         """
-        returns the public or private ip_address address of the instance.
-        to get the public ip_address address, set ip_type to "PublicIp"
+        Adds the loadcat data to the VM's data for a service.
+
+        Args:
+            data_dict (dict): The loadcat data dictionary.
         """
-        client = boto3.client("ec2", **CREDENTIALS, region_name="us-east-1")
-        response = client.describe_instances(InstanceIds=[self.instance_id])
-        return response["Reservations"][0]["Instances"][0]["NetworkInterfaces"][0][
-            ip_type
-        ]
+        self.loadcat_data["loadcat_server"] = data_dict
 
-    def get_instance_cpu_util(self):
-        client = boto3.client("cloudwatch", **CREDENTIALS, region_name="us-east-1")
-        logger.info(f"instance_id is : {self.instance_id}")
-        response = client.get_metric_statistics(
-            Namespace="AWS/EC2",
-            MetricName="CPUUtilization",
-            Dimensions=[{"Name": "InstanceId", "Value": self.instance_id}],
-            # StartTime=datetime.datetime.now() - datetime.timedelta(minutes=15),
-            StartTime=datetime.datetime.now() - datetime.timedelta(seconds=180),
-            EndTime=datetime.datetime.now(),
-            Period=30,
-            # Statistics=["SampleCount", "Average", "Sum", "Minimum", "Maximum"],
-            Statistics=["Average"],
-        )
-        # print(response['Datapoints']
-        # logger.info(*response['Datapoints'], sep='\n')
+    def return_loadcat_data_per_service(self) -> defaultdict:
+        """
+        Returns the loadcat data for each service on the VM.
 
-        with open(module_conf.pickle_file, "wb") as output:  # FOR TEST
-            pickle.dump(response["Datapoints"], output, pickle.HIGHEST_PROTOCOL)
-        for x in response["Datapoints"]:
-            logger.info(x)
-        return response
-        # return response["Datapoints"][0]["Average"]
+        Returns:
+            defaultdict: The loadcat data defaultdict.
+        """
+        return self.loadcat_data
 
+    def get_instance_private_ip(self, ip_type="PrivateIpAddress"):
+        """
+        Returns the public or private IP address of the instance.
+        To get the public IP address, set ip_type to "PublicIp".
+        """
+        # keep checking until we get instance id
 
-@dataclass
-class InstanceInfoClass:
-    vm_class_info: VM = None
-    running_time: datetime.datetime = datetime.datetime.now()
-    previously_launched_instances: bool = False
-    number_of_elapsed_minutes: int = 0
-    cpu_util: float = 0
-
-
-@dataclass
-class TerminatedInstanceInfoClass(InstanceInfoClass):
-    termination_time: datetime.datetime = datetime.datetime.now()
-
-
-def update_weight_for_vm_and_hybrid(vm_class: VM, offload: bool):
-    balancer_ip_addr_with_port = lb_conf.balancer_ip_addr_with_port
-
-    if offload:  # Make VM Unavailable
-        update_worker_attribute(
-            balancer_ip_addr_with_port,
-            vm_class,
-            vm_class.worker_id,
-            offload_worker=True,
-        )
-
-    else:  # Make VM Available
-        update_worker_attribute(
-            balancer_ip_addr_with_port,
-            vm_class,
-            vm_class.worker_id,
-            get_back_to_original_worker=True,
-        )
-
-
-def utc_to_local(utc_dt):
-    local_tz = pytz.timezone("Asia/Seoul")
-    local_dt = utc_dt.replace(tzinfo=pytz.utc).astimezone(local_tz)
-    return local_tz.normalize(local_dt)  # .normalize might be unnecessary
+        ec2 = boto3.resource("ec2", **CREDENTIALS, region_name="us-east-1")
+        instance = ec2.Instance(self.instance_id)
+        ip_address = ""
+        while not ip_address:
+            try:
+                ip_address = instance.network_interfaces_attribute[0].get("PrivateIpAddress")
+            except ClientError:
+                # Handle the exception as needed
+                pass
+        return ip_address
 
 
 def find_public_ip_and_launch_time(ec2_instance_id):
-    client = boto3.client("ec2", region_name="us-east-1", **CREDENTIALS)
+    """Find the public IP address and launch time of an EC2 instance"""
 
+    def utc_to_local(utc_dt):
+        local_tz = pytz.timezone("Asia/Seoul")
+        local_dt = utc_dt.replace(tzinfo=pytz.utc).astimezone(local_tz)
+        return local_tz.normalize(local_dt)  # .normalize might be unnecessary
+
+    global ec2_client
     instance_public_ip, ec2_instance_launch_time = None, None
-
     while True:
         try:
-            response1 = client.describe_instances(InstanceIds=[ec2_instance_id])
-            # logger.debug(response1)
-
+            response1 = ec2_client.describe_instances(InstanceIds=[ec2_instance_id])
             for reservation in response1["Reservations"]:
-                # logger.debug(reservation)
-
                 for instance in reservation["Instances"]:
-                    # logger.debug(instance.get("InstanceId"))
-
-                    # if instance.get("InstanceId") == ec2_instance_id:
                     instance_public_ip = instance.get("PublicIpAddress")
                     ec2_instance_launch_time = instance.get("LaunchTime")
-                    # logger.debug(instance_public_ip)
                     if instance_public_ip is None:
                         time.sleep(1)
-                        logger.info(f"\tRetrieving PublicIpAddress for {ec2_instance_id}")
                         raise TypeError
-
-        except TypeError:
-            # logger.debug("ip is none")
+        except:
+            logger.info(f"\t\tNo information of {ec2_instance_id} yet, retrying")
             continue
-
         break
-        # logger.debug(instance.get("PublicIpAddress"))
-        # logger.debug(instance.get("LaunchTime"))
-        # logger.debug(instance.get("PublicIpAddress"))
-        # instance_public_ip = instance.get("PublicIpAddress")
 
-    # sys.exit()
     return instance_public_ip, utc_to_local(ec2_instance_launch_time).replace(tzinfo=None)
 
 
-def check_ssh_for_spawning_time(ip_addr):
-    try:
-        get_session(ip_addr)
-    except Exception as e:
-        logger.info(f"\t\tSSH exception for ip_address: {ip_addr} - {e}")
-        return False
-    else:
-        return datetime.datetime.now()
-
-
-def get_session(ip_address):
+def check_ssh_for_spawning_time(ip_address):
     ssh = paramiko.client.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
-    # key_name = "/Users/mj/.ssh/mjay.pem"
-    key_name = f"/Users/mj/.ssh/{lb_conf.key_name}"
-    logger.info(f"\tssk key is : {key_name}")
-    ssh.connect(ip_address, username="ec2-user", key_filename=key_name)
-    # sftp = ssh.open_sftp()
-    return ssh
+    key_dir = Path(__file__).parent.absolute() / 'utils'
+    key_name = conf_dict.server_config.get("key_name")
+    key_name_with_dir = f"{key_dir}/{key_name}"
+    logger.info(f"\t\tssk key is : {key_name_with_dir}")
+
+    try:
+        ssh.connect(ip_address, username="ec2-user", key_filename=key_name_with_dir)
+        return datetime.datetime.now()
+    except Exception as e:
+        logger.info(f"\t\tSSH exception for ip_address: {ip_address} - {e}")
+        return False
 
 
-def wait_till_spawning_complete(inst_id):
+def add_instance_to_lb(inst_id, init_phase=False):
     """
-    Make sure all instances are connected by ssh success
+    Add instances to Loadbalancer per microservice loadbalancer
     """
-    global WHOLE_INSTANCE_INFO
 
-    logger.info(f"\tinstance is {inst_id}")
+    global whole_instance_info, logger, ec2_private_ip
+
+    logger.info(f"\t\tinstance id is {inst_id}")
+
+    # Make VM class from instance and set weight as 1 (for loadbalancer)
+    server_information = VM(instance_id=inst_id)
+    server_information.set_weight(weight=1)
+
+    experiment_case = conf_dict.experiment_info.get("experiment_case")
+
+    # If using Lambda, assume VMs are ready before attaching to LB
+    # This lets us assume we already have newly launched instances ready when calculating the number of servers
+    if experiment_case == "microblend" and not init_phase:
+        instance_info = InstanceInfoClass(running_time=datetime.datetime.now())
+        logger.debug("\t\t\t[microblend] -> Add instance since lambda take cares of request upon autoscaling")
+        update_instance_info_and_save_to_whole_info(instance_info, server_information, inst_id)
+
+    # Get public IP address and launch time of instance
     instance_public_address, instance_launch_time = find_public_ip_and_launch_time(inst_id)
-    logger.info(f"\tpublic address for {inst_id} is {instance_public_address}")
+    logger.info(f"\t\tpublic address for {inst_id} is {instance_public_address}")
+
+    # Check if instance is in running state (check if it can be accessed by SSH)
+    logger.info(f"\t\tCheck if {inst_id} can be accessed by SSH.")
     while True:
-        ssh_success_time = check_ssh_for_spawning_time(ip_addr=instance_public_address)
-        time.sleep(0.5)
+        ssh_success_time = check_ssh_for_spawning_time(instance_public_address)
+        time.sleep(0.5)  # Needs some interval, otherwise error happens
         if ssh_success_time:
-            logger.info(f"\t{inst_id} is running currently")
-
-            logger.info("\tSave Running Time in WHOLE_INSTANCE_INFO -> Will update when done adding to LB")
-            whole_instance_info = InstanceInfoClass(running_time=datetime.datetime.now())
-            # inst_info: InstanceInfoClass = WHOLE_INSTANCE_INFO.get(inst_id)
-            WHOLE_INSTANCE_INFO[inst_id] = whole_instance_info
-            logger.info(f"\tWHOLE_INSTANCE_INFO ({len(WHOLE_INSTANCE_INFO)} -> {pformat(WHOLE_INSTANCE_INFO)}")
-            # inst_info.running_time = datetime.datetime.now()
-
+            logger.info(f"\t\t\t{inst_id} is in running state")
+            # Make InfoClass with datetime for instance and save in whole_instance_info
+            instance_info = InstanceInfoClass(running_time=datetime.datetime.now())
             break
 
-    vm_info_of_instance = VM(instance_id=inst_id)
-    vm_info_of_instance.set_weight(weight=1)
-
-    # Add instances to INSTANCE_WORKERS
-    # Consistency
-    instance_workers_lock.acquire()
-
-    # Append VM instance to global keeper
-    logger.info("\tAdding Instance info class to WHOLE_INSTANCE_INFO")
-    instance_info_class: InstanceInfoClass = WHOLE_INSTANCE_INFO.get(vm_info_of_instance.instance_id)
-    instance_info_class.vm_class_info = vm_info_of_instance
-    instance_info_class.previously_launched_instances = True
-    instance_info_class.cpu_util = 0
-    # instance_info_class = InstanceInfoClass(vm_info_of_instance, datetime.datetime.now(), True, 0)
-    # WHOLE_INSTANCE_INFO[vm_info_of_instance.instance_id] = instance_info_class
-    # WHOLE_INSTANCE_INFO[vm_info_of_instance.instance_id].vm_class_info = vm_info_of_instance
-    # WHOLE_INSTANCE_INFO[vm_info_of_instance.instance_id].number_of_elapsed_minutes = 0
-    # WHOLE_INSTANCE_INFO[vm_info_of_instance.instance_id].running_time = datetime.datetime.now()
-    # WHOLE_INSTANCE_INFO[vm_info_of_instance.instance_id].previously_launched_instances = True
-
-    # Consistency
-    instance_workers_lock.release()
-
     logger.info(f"\tStart adding instance {inst_id} to LB")
-    thread_for_attacher = LBAttacher(vm=vm_info_of_instance)
-    thread_for_attacher.start()
-    thread_for_attacher.join()
 
-    logger.info(f"\tUpdate {vm_info_of_instance.instance_id} running-time in WHOLE_INSTANCE_INFO")
-    instance_info_class.running_time = datetime.datetime.now()
-    # threads_for_adding_to_lb.append(thread_for_attacher)
-    logger.info(f"\tCurrent Instances Info ({len(WHOLE_INSTANCE_INFO)}) instances:"
-                f" {pformat(WHOLE_INSTANCE_INFO)}")
+    # Create and start a new LBAttacher thread for this server information
+    attacher_thread = LBAttacher(vm=server_information)
+    attacher_thread.start()
 
-    return
+    # Wait for the thread to finish executing (i.e., wait for the server to be added to the load balancer)
+    attacher_thread.join()
+
+    # Add information to whole_info after being added to LBAttacher
+    logger.info(f"\t\tAdding {inst_id} instance info class to whole_instance_info")
+    update_instance_info_and_save_to_whole_info(instance_info, server_information, inst_id)
+
+    # Add private ip for lambda environment
+    ec2_private_ip.append(server_information.instance_ip)
+
+
+def update_instance_info_and_save_to_whole_info(instance_info: InstanceInfoClass, server_information: VM, inst_id,
+                                                hybrid=False):
+    """
+    Store information -> Save to whole_instance_info
+    """
+    global logger
+
+    instance_info.vm_class_info = server_information
+
+    # If we use microblend approach, we assume newly launched instance is already there
+    if hybrid:
+        instance_info.recent_instance = False
+    else:
+        instance_info.recent_instance = True
+
+    instance_info.cpu_util = 0
+    instance_info.running_time = datetime.datetime.now()
+
+    if index_for_stopping_scaling_policy:
+        logger.info("\tNot adding instance info since workload ended [Ended Policy]\n")
+        return
+    else:
+        whole_instance_info[inst_id] = instance_info  # Add information to whole_info
+        # logger.debug(whole_instance_info)
+
+
+def attach_server_to_lb(server_info):
+    """Attach server to load balancer in a separate thread."""
+    LBAttacher(vm=server_info).start()
 
 
 class LBAttacher(threading.Thread):
+    """
+    Adding workers to Microservice LoadBalancers
+    """
+
     def __init__(self, vm):
         super(LBAttacher, self).__init__()
         self.vm = vm
 
     def run(self):
-        # TODO: change this - Time for downloading image and other things before running mxnet
-        time.sleep(3)
-        add_worker_to_lb(lb_conf.balancer_id, lb_conf.balancer_ip_addr_with_port, self.vm, )
+        """
+        Add workers to loadbalancers
+        """
+        add_each_worker_to_lb(self.vm)
 
 
-def turn_off_worker(lb_url, vm):
-    return update_worker_attribute(
-        lb_url, vm, {"settings.availability": "unavailable"}, remove_worker=True
-    )
+def update_worker_attribute(balancer_ip_addr_with_port, vm, worker_id, attr_dict=None, new_resource=False,
+                            remove_worker=False):
+    """
+    Update worker's attribute (e.g. availability) in Loadcat
+    """
+
+    def get_url_for_edit_server_info(worker_id_from_loadcat):
+        """
+        Get URL for server edit
+        """
+        return f"http://{balancer_ip_addr_with_port}/servers/{worker_id_from_loadcat}/edit"
+
+    # If no data for server, make empty one
+    if attr_dict is None:
+        attr_dict = {}
+
+    if new_resource:
+        # Wait some time before updating
+        logger.info("Wait for VM to be ready (20s)")
+        time.sleep(20)
+
+        # Address to edit server's information
+        address_for_editing = get_url_for_edit_server_info(worker_id)
+
+        # Fetch server information
+        info_for_server = attr_dict.copy()
+        info_for_server["settings.availability"] = ["available"]
+
+        # POST to update the server information
+        response = s.post(url=address_for_editing, data=info_for_server, headers=user_agent)
+        time.sleep(0.01)
+        assert response.status_code == 200
+
+        # Add loadcat data to VM
+        vm.add_loadcat_data(info_for_server)
+        # logger.info(f"\t\t{vm.ec2_id} updated to {vm.loadcat_data}")
+
+    elif remove_worker:
+        # Get address for editing
+        address_for_editing = get_url_for_edit_server_info(worker_id)
+
+        # Update status as backup to finish already given request
+        info_for_server_dict: dict = vm.return_loadcat_data_per_service().get('loadcat_server')
+        info_for_server_dict["settings.availability"] = ["backup"]
+        response = s.post(url=address_for_editing, data=info_for_server_dict)
+        time.sleep(0.01)
+        assert response.status_code == 200
+
+        # Wait some time to finish already sent request
+        time.sleep(5)
+        logger.info("\t\tGive grace period to finish already sent request (5 mins)")
+
+        # Update to unavailable
+        info_for_server_dict["settings.availability"] = ["unavailable"]
+        response = s.post(url=address_for_editing, data=info_for_server_dict, headers=user_agent)
+        time.sleep(0.01)
+        assert response.status_code == 200
+
+    logger.info(f"\t\t{vm.instance_id} updated to {vm.loadcat_data}")
 
 
 class LBDetacher(threading.Thread):
+    """
+    Remove workers from microservice loadbalancers and terminate instances
+    """
+
     def __init__(self, vm):
         super(LBDetacher, self).__init__()
         self.vm = vm
 
     def run(self):
-        logger.info("\tStart Removing instance {} from LB: ".format(self.vm.get_instance_id()))
-        turn_off_worker(lb_conf.balancer_ip_addr_with_port, self.vm)
-        logger.info("\tFinished Removing instance {} from LB: ".format(self.vm.get_instance_id()))
+        """
+        Remove workers from loadbalancers and terminate instances
+        """
 
+        # Remove public ip for env in lambda
+        # logger.info(f"\tStart removing {self.vm.instance_ip} from ec2_private_ip for environment of AWS Lambda")
+        # ec2_private_ip.remove(self.vm.instance_ip)
+        # logger.info(f"\tFinished removing {self.vm.instance_ip} from ec2_private_ip for environment of AWS Lambda")
+
+        # Remove workers from loadbalancers
+        logger.info(f"\tStart removing workers of {self.vm.get_instance_id()} from microservice loadbalancers")
+        loadbalancer_ip_addr_with_port = conf_dict.external_lb_config["loadbalancer-addr"]
+        loadcat_addr_with_port = f"{loadbalancer_ip_addr_with_port}:26590"
+        worker_id = instance_to_worker[self.vm.get_instance_id()]
+        update_worker_attribute(loadcat_addr_with_port, self.vm, worker_id, remove_worker=True)
+        logger.info(f"\tFinished removing workers of {self.vm.get_instance_id()} from microservice loadbalancers")
+
+        # Terminate instance
         logger.info("\tStart terminating instance {}".format(self.vm.get_instance_id()))
-        terminate_instance(self.vm.get_instance_id(), lb_conf.region_name)
+        terminate_instance(self.vm.get_instance_id())
         logger.info("\tFinished terminating instance {}".format(self.vm.get_instance_id()))
 
 
-def add_worker_to_lb(balancer_id, lb_address, vm):
-    # noinspection HttpUrlsUsage
-    """add a new worker to load balancer.
-    The attr_dict must contain backup and down attrs and both should be set to false
-    weight attr also is in this info_for_server structure and default value is 1
-
-    example) balancer_ip_address_with_port='http://100.26.175.206:26590'
+def add_each_worker_to_lb(vm: VM):
     """
-    # First create server with default settings
-    # Port number
-    port_number = 5000
+        Add a new worker to the load balancer
 
-    address_for_new_server = "/balancers/" + balancer_id + "/servers/new"
+        Steps:
+        1. Generate the URL for adding a new server
+        2. Send a request to create the new server
+        3. Get the server ID from the response URL
+        4. Add the server ID to the global worker list
+        5. Store the instance ID to server ID mapping in a global dictionary
+        6. Add data to the new server (weight, availability, etc.)
+        7. After a period of time, update the new server's availability to "available"
+    """
+    global worker_list_in_lbs, instance_to_worker
 
-    full_address_for_new_server = "http://" + lb_address + address_for_new_server
+    loadbalancer_id = conf_dict.external_lb_config["loadbalancer_id"]
+    loadbalancer_ip_addr_with_port = conf_dict.external_lb_config["loadbalancer-addr"]
+    loadcat_addr_with_port = f"{loadbalancer_ip_addr_with_port}:26590"
+    addr_for_new_worker = f"/balancers/{loadbalancer_id}/servers/new"
 
-    info_for_server = defaultdict()
-    info_for_server["settings.address"] = vm.get_instance_ip() + ":" + str(port_number)
-    info_for_server["label"] = vm.get_instance_id()
+    addr_for_url = f"http://{loadcat_addr_with_port}{addr_for_new_worker}"
+    logger.info(f"\t\tAdding {vm.get_instance_id()} to load balancer {loadbalancer_id}")
 
-    # make request of making new server
+    # Data to put in Loadcat
+    port_number = int(conf_dict.server_config.get("server_port"))
+    info_for_server = {"settings.address": f"{vm.get_instance_private_ip()}:{port_number}",
+                       "label": vm.get_instance_id()}
+
+    # Make request to create new server
     try:
-        r = requests.post(url=full_address_for_new_server, data=info_for_server)
+        r = s.post(url=addr_for_url, data=info_for_server, headers=user_agent)
+        time.sleep(0.01)
     except requests.exceptions.ConnectionError as e:
         logger.info(f"Exception {e} happened")
-    else:
-        worker_id = r.text.strip("\n")
-        assert r.status_code == 200
-        vm.set_worker_id(worker_id)
+        return
 
-        # After creation, update server
-        info_for_server["settings.weight"] = vm.get_weight()
-        info_for_server["settings.availability"] = "available"
-        update_worker_attribute(
-            lb_address,
-            vm,
-            worker_id,
-            attr_dict=info_for_server,
-            new_resource=True,
-            hybrid_code=False,
-        )
+    # get server id from url response
+    assert r.status_code == 200
+    server_id = r.url.split("/servers/")[1].split("/")[0]
 
-    logger.info(f"\tFinish adding instance {vm.instance_id} to LB")
+    # Add worker id to global worker list
+    worker_list_in_lbs.append(server_id)
+    instance_to_worker[vm.get_instance_id()] = server_id
 
-    # Write to json file
-    logger.info("\tWriting worker info to json file")
-    with open(module_conf.worker_log_file) as json_file:
+    # Put data in dictionary
+    info_for_server["settings.weight"] = 1
+    info_for_server["settings.availability"] = "unavailable"
 
-        try:
-            json_data = json.load(json_file)
-        except ValueError as e:
-            logger.info(f"\tException : {e} -> Json File is empty -> Filling a new one")
-            json_data = defaultdict()
-            json_data["workers"] = []
+    # Add other information to Loadcat
+    url_to_append = f"/servers/{server_id}/edit"
+    url = f"http://{loadcat_addr_with_port}{url_to_append}"
+    response = s.post(url=url, data=info_for_server, headers=user_agent)
+    assert response.status_code == 200
 
-        json_data["workers"].append(vm.__dict__)
-
-    with open(module_conf.worker_log_file, "w") as json_file:
-        json.dump(json_data, json_file)
-    # json_lock.release()
-    # return r.text
+    # After a period of time, make server available (due to VM's launching time)
+    update_worker_attribute(
+        balancer_ip_addr_with_port=loadcat_addr_with_port,
+        vm=vm,
+        worker_id=server_id,
+        attr_dict=info_for_server,
+        new_resource=True
+    )
 
 
-def bring_new_resource(num_of_workers_to_add=0, init_phase=False) -> None:
+def remove_each_worker_from_lb(vm: VM):
+    """ Remove worker from load balancer (making it unavailable) """
+    loadbalancer_ip_addr_with_port = conf_dict.external_lb_config["loadbalancer-addr"]
+    loadcat_addr_with_port = f"{loadbalancer_ip_addr_with_port}:26590"
+    worker_id = instance_to_worker[vm.get_instance_id()]
+
+    update_worker_attribute(
+        balancer_ip_addr_with_port=loadcat_addr_with_port,
+        vm=vm,
+        worker_id=worker_id,
+        remove_worker=True
+    )
+
+
+def update_ec2_private_ip_env_in_lambda(lambda_arn_list):
     """
-    Create Instance -> Wait for spawning ->
-    Keep Track of regular instances -> Add to LoadBalancer
+    This function is for code where Lambda interacts with MongoDB
+    Iterate lambda microservices and update mongo db for load balancing"""
+
+    def update_mongo_addr_list_in_lambda(lambda_arn, server_addr_str):
+        """Invoke Lambda"""
+        lambda_client.update_function_configuration(FunctionName=lambda_arn,
+                                                    Environment={'Variables': {'mongo_addr_list': server_addr_str}})
+
+    logger.info("Start Updating Private Ip ENV for Mongo in Lambda")
+
+    # Make a format <ip>;<ip>
+    private_ip_addr_str = ';'.join([str(elem) for elem in ec2_private_ip])
+    logger.info(f"\tPrivate ip address is {private_ip_addr_str}")
+
+    # Make workers from each microservice unavailable concurrently
+    threads = list()
+    for each_lambda_arn in set(lambda_arn_list):
+        thread = threading.Thread(target=update_mongo_addr_list_in_lambda, args=[each_lambda_arn, private_ip_addr_str])
+        threads.append(thread)
+        threads[-1].start()
+    for thread in threads:
+        thread.join()
+
+    logger.info("Finished Updating Private Ip ENV for Mongo in Lambda")
+
+
+async def make_compose_post_input_dict():
+    """
+    Generates random input for the Compose Post service and returns a dictionary containing the parameters.
+
+    Returns:
+        dict: A dictionary containing the parameters for the Compose Post service.
     """
 
-    # Fetch global instances
-    # global INSTANCE_WORKERS
-
-    # Update newly instance list
-    # global INITIAL_OR_LAUNCHED_1_MINUTE_AGO_INSTANCES
-
-    global WHOLE_INSTANCE_INFO
-
-    if init_phase:
-        logger.info(f"\tRequested {lb_conf.init_number_of_instance} instances")
-        logger.info(f"\tInstance Type: {lb_conf.instance_type}")
-        # logger.info(f"\tInstance Number: {lb_conf.init_number_of_instance}")
-        inst_id_list_to_launch = create_instance(
-            num=lb_conf.init_number_of_instance,
-            instance_type=lb_conf.instance_type,
-            image_id=lb_conf.image_id,
-            snid=lb_conf.snid,
-            security_g=lb_conf.security_groups,
-            key_name=lb_conf.key_name
-        )
-
-    else:  # Non-init_phase phase from scaling policy
-        logger.info(f"\t\t\tRequested {num_of_workers_to_add} instances")
-        inst_id_list_to_launch = create_instance(
-            num=num_of_workers_to_add,
-            instance_type=lb_conf.instance_type,
-            image_id=lb_conf.image_id,
-            snid=lb_conf.snid,
-            security_g=lb_conf.security_groups,
-            key_name=lb_conf.key_name
-        )
-
-    # Threads for waiting till all instances are running
-    threads_for_waiting_for_spawning = []
-
-    for instance_id in inst_id_list_to_launch:
-        each_thread = threading.Thread(target=wait_till_spawning_complete, args=[instance_id])
-        threads_for_waiting_for_spawning.append(each_thread)
-
-    for job in threads_for_waiting_for_spawning:
-        job.start()
-
-    # for instance_id in inst_id_list_to_launch:
-    #     # For each instance, make VM class that contains weight or other info
-    #     vm_info_of_instance = VM(instance_id=instance_id)
-    #     vm_info_of_instance.set_weight(weight=1)
-    #
-    #     # Add instances to INSTANCE_WORKERS
-    #     # Consistency
-    #     instance_workers_lock.acquire()
-    #
-    #     # Append VM instance to global keeper
-    #     logger.info("\tAdding Instance info class to WHOLE_INSTANCE_INFO")
-    #     instance_info_class: InstanceInfoClass = WHOLE_INSTANCE_INFO.get(vm_info_of_instance.instance_id)
-    #     instance_info_class.vm_class_info = vm_info_of_instance
-    #     instance_info_class.previously_launched_instances = True
-    #     instance_info_class.cpu_util = 0
-    #     # instance_info_class = InstanceInfoClass(vm_info_of_instance, datetime.datetime.now(), True, 0)
-    #     # WHOLE_INSTANCE_INFO[vm_info_of_instance.instance_id] = instance_info_class
-    #     # WHOLE_INSTANCE_INFO[vm_info_of_instance.instance_id].vm_class_info = vm_info_of_instance
-    #     # WHOLE_INSTANCE_INFO[vm_info_of_instance.instance_id].number_of_elapsed_minutes = 0
-    #     # WHOLE_INSTANCE_INFO[vm_info_of_instance.instance_id].running_time = datetime.datetime.now()
-    #     # WHOLE_INSTANCE_INFO[vm_info_of_instance.instance_id].previously_launched_instances = True
-    #
-    #     # Consistency
-    #     instance_workers_lock.release()
-    #
-    #     logger.info(f"\tStart adding instance {instance_id} to LB")
-    #     thread_for_attacher = LBAttacher(vm=vm_info_of_instance)
-    #     thread_for_attacher.start()
-    #     threads_for_adding_to_lb.append(thread_for_attacher)
-
-    for job in threads_for_waiting_for_spawning:
-        job.join()
-
-    # for thread_for_attacher in threads_for_adding_to_lb:
-    #     thread_for_attacher.join()
-
-    logger.info(f"\tFinished adding all instances to LB")
-    # logger.info(f"\tRunning Instances are {list(INSTANCE_DICT_INFO.keys())}")
-    # logger.info(f"\tINSTANCE_DICT_INFO : {INSTANCE_DICT_INFO}")
-    # logger.info(f"\tWHOLE_INSTANCE_INFO : {pformat(WHOLE_INSTANCE_INFO)}")
+    # Generate random input and encode params
+    compose_post_parameter = generate_input_for_compose_post_service()
+    req_id = compose_post_parameter.req_id
+    username, user_id = compose_post_parameter.username, compose_post_parameter.user_id
+    text, media_ids = compose_post_parameter.text, compose_post_parameter.media_ids
+    media_types, post_type = compose_post_parameter.media_types, compose_post_parameter.post_type
+    compose_post_input_parameter = {"req_id": req_id, "username": username, "user_id": user_id, "text": text,
+                                    "media_ids": media_ids, "media_types": media_types, "post_type": post_type,
+                                    "carrier": {}}
+    return compose_post_input_parameter
 
 
-async def send_req(session, num=0, arrive_time=0, num_of_tasks=0, total_reqs=0, cold_s=False):
-    # conn = aiohttp.TCPConnector(family=socket.AF_INET, ssl=False,)
-    global NUMBER_OF_VIOLATION
-    global VIOLATED_DURATIONS
-    global DURATION_LIST
-    global TOTAL_DURATION
+async def send_request(sess, num=0, arrive_time=0, num_of_tasks=0, total_reqs=0):
+    duration_info["duration_in_seconds"] = arrive_time
 
-    TOTAL_DURATION = arrive_time
+    slo_target = float(conf_dict.experiment_info.get("slo_target"))
 
-    # retry_client = RetryClient(session)
+    compose_post_input_dict = await make_compose_post_input_dict()
+    encoded_input_dict = encode_native_object(compose_post_input_dict)
 
-    # Cold Start Lambda Use Case
-    if cold_s:
-        logger.info("Invoke Cold Start")
-        address_to_request = (
-                "http://"
-                + lb_conf.balancer_ip_addr
-                + WORKLOAD_CHOICE.get("mat_mul")
-                + "lambda"
-        )
+    url = f"http://{lb_addr}:{lb_port}/python-social-network"
+    url = "http://httpbin.org/get"  # for testing purposes
+    await asyncio.sleep(0.001)
 
-        retries = Retry(total=15, backoff_factor=0.1, status_forcelist=[500, 502, 503, 504])
-        session.mount('http://', HTTPAdapter(max_retries=retries))
-        # async with aiohttp.ClientSession(connector=conn) as session:
-        # async with aiohttp.ClientSession() as session:
+    start = time.time()
+    if request_type == "vm":
         try:
-            async with session.get(address_to_request, timeout=50) as resp:
-                logger.info("Invoked Lambda for Cold Start")
+            async with sess.get(url, timeout=5) as resp:
                 assert resp.status == 200
 
-        except aiohttp.ClientConnectionError as e:
-            logger.info(f"Error {e}")
+                duration = float((time.time() - start) * 1000)
 
-    else:
-        address_to_request = (
-                "http://"
-                + lb_conf.balancer_ip_addr
-                + WORKLOAD_CHOICE.get("mat_mul")
-                + REQUEST_TYPE
-        )
-
-        # TODO: when REQUEST_TYPE = lambda -> address_to_request = "compiler_created_lambda_arn"
-
-        # logger.info(address_to_request)
-
-        # logger.info(f"address_to_request is {address_to_request}")
-        # For error with concurrency -> need a milli gap
-        await asyncio.sleep(0.001)
-
-        # Measure start time
-        start = time.time()
-
-        try:
-            async with session.get(address_to_request, timeout=15) as resp:
-                # async with retry_client.get(address_to_request, retry_attempts= 10, retry_for_statuses=statuses,
-                #                             timeout=15) as resp:
-                # Wait for result
-                result = await resp.text()
-
-                request_type = "vm"
-
-                # logger.info(result)
-                if "Lambda" in result.split(" "):
-                    request_type = "lambda"
-
-                # Get duration
-                end = time.time()
-                duration = float((end - start) * 1000)
-
-                # Add all duration
-                DURATION_LIST.append(duration)
-
-                if request_type == "lambda":
-                    logger.info(
-                        f"[Lambda] Total request {total_reqs} - "
-                        f"Request {num + 1}/{num_of_tasks} "
-                        f"at time {arrive_time} - Response - {result} and took {duration} - Number of "
-                        f"violations - {NUMBER_OF_VIOLATION}"
-                    )
-
-                elif float(duration) >= SLO_CRITERIA:
-                    NUMBER_OF_VIOLATION += 1
-                    VIOLATED_DURATIONS.append(duration)
-                    # Info Result
-                    logger.info(
-                        f"Total request {total_reqs} - "
-                        f"Request {num + 1}/{num_of_tasks} "
-                        f"at time {arrive_time} - Response - {result} and took {duration} - Violated SLO - Number of "
-                        f"violations - {NUMBER_OF_VIOLATION}"
-                    )
-
+                if duration <= slo_target:
+                    await save_and_print_response(arrive_time, duration, num, num_of_tasks, total_reqs)
                 else:
-                    # NUMBER_OF_VIOLATION += 1
-                    # VIOLATED_DURATIONS.append(duration)
-                    # Info Result
-                    logger.info(
-                        f"Total request {total_reqs} - "
-                        f"Request {num + 1}/{num_of_tasks} "
-                        f"at time {arrive_time} - Response - {result} and took {duration} - Number of "
-                        f"violations - {NUMBER_OF_VIOLATION}"
-                    )
-
-                assert resp.status == 200
+                    await save_and_print_response(arrive_time, duration, num, num_of_tasks, total_reqs, violated=True)
 
         except asyncio.TimeoutError:
             logger.info(f"Exception -> Timeout Error")
-
-            # Get duration for this exceptional case
-            end = time.time()
-            duration = float((end - start) * 1000)
-
-            # Add all duration
-            DURATION_LIST.append(duration)
-
-            NUMBER_OF_VIOLATION += 1
-            VIOLATED_DURATIONS.append(duration)
-
-            logger.info(
-                f"Total request {total_reqs} - "
-                f"Request {num + 1}/{num_of_tasks} "
-                f"at time {arrive_time} - Response - Error and took {duration} - Violated SLO - Number of "
-                f"violations - {NUMBER_OF_VIOLATION}"
-            )
+            duration = float(5000)
+            await save_and_print_response(arrive_time, duration, num, num_of_tasks, total_reqs, violated=True)
 
         except aiohttp.ClientConnectionError as e:
             logger.info(f"Exception {e} -> ClientConnectionError -> Violated SLO")
-            # logger.info("Happens when reading last line")
+            duration = float(5000)
+            await save_and_print_response(arrive_time, duration, num, num_of_tasks, total_reqs, violated=True)
 
-            # Get duration for this exceptional case
-            end = time.time()
-            duration = (end - start) * 1000
+        except Exception as e:
+            logger.info(f"Other exception -> Violated SLO: {e}")
+            duration = float(5000)
+            await save_and_print_response(arrive_time, duration, num, num_of_tasks, total_reqs, violated=True)
 
-            # Add all duration
-            DURATION_LIST.append(duration)
+    elif request_type == "lambda":
 
-            NUMBER_OF_VIOLATION += 1
-            VIOLATED_DURATIONS.append(duration)
+        # Fetch experiment_info
+        # experiment_info: ExperimentInfo = experiment_info_dict.get(experiment_number)
+        # clientpool_suffix = experiment_info.clientpool_suffix
+        # lambda_arn = experiment_info.lambda_arn
+        # lambda_invoke_url = experiment_info.lambda_url
 
-            logger.info(
-                f"Total request {total_reqs} - "
-                f"Request {num + 1}/{num_of_tasks} "
-                f"at time {arrive_time} - Response - Error and took {duration} - Violated SLO - Number of "
-                f"violations - {NUMBER_OF_VIOLATION}"
-            )
+        try:
+            # Experiment when VM handles first and Lambda handles last
+            # if experiment_number in ["experiment-2", "experiment-3"]:
+            #     await vm_compose_post_first(url, lambda_invoke_url, sess)
+            #
+            # # Experiment when Lambda handles first and VM handles last
+            # elif experiment_number in ["experiment-4", "experiment-5"]:
+            #     await vm_compose_post_last(compose_post_input_dict, lambda_arn, clientpool_suffix, sess)
+            #
+            # # Lambda is called in VM
+            # elif experiment_number in ["experiment-6", "experiment-7", "experiment-8", "experiment-9",
+            #                            "experiment-10", "experiment-11"]:
+            #     hybrid_url = f"{host}/{compose_post_name}/{encoded_compose_post_input_dict}/{clientpool_suffix}"
+            #     async with sess.get(hybrid_url, timeout=5) as resp:
+            #         assert resp.status == 200
+            #
+            # else:
+            #     async with sess.get(url, timeout=5) as resp:
+            #         assert resp.status == 200
+
+            # Get duration & Add all duration to total duration
+            duration = float((time.time() - start) * 1000)
+
+            # When response is less than SLO
+            if float(duration) < slo_target:
+                await save_and_print_response(arrive_time, duration, num, num_of_tasks, total_reqs,
+                                              service="lambda")
+
+            # When violation SLO
+            elif float(duration) >= slo_target:
+                await save_and_print_response(arrive_time, duration, num, num_of_tasks, total_reqs,
+                                              service="lambda", violated=True)
+
+        except asyncio.TimeoutError:
+            logger.info(f"Exception -> Timeout Error")
+            duration = float(5000)
+            await save_and_print_response(arrive_time, duration, num, num_of_tasks, total_reqs,
+                                          service="lambda", violated=True)
+
+        except aiohttp.ClientConnectionError as e:
+            logger.info(f"Exception {e} -> ClientConnectionError -> Violated SLO")
+            duration = float(5000)
+            await save_and_print_response(arrive_time, duration, num, num_of_tasks, total_reqs,
+                                          service="lambda", violated=True)
+
+        except:
+            logger.info(f"Other exception -> Violated SLO")
+            duration = float(5000)
+            await save_and_print_response(arrive_time, duration, num, num_of_tasks, total_reqs,
+                                          service="lambda", violated=True)
 
 
-# For Retry ClientSession
-statuses = {x for x in range(100, 600)}
-statuses.remove(200)
-statuses.remove(429)
+async def save_and_print_response(arrival_time, duration, request_num, num_of_tasks, total_requests, service="vm",
+                                  violated=False):
+    """ Save and print response information """
+    duration_info["duration_list"].append(duration)
 
+    if service == "vm":
+        if violated:
+            duration_info["number_of_violation"] += 1
+            duration_info["violated_duration_list"].append(duration)
+            logger.info(f"VM - Total requests: {total_requests} - "
+                        f"Request {request_num + 1}/{num_of_tasks} at time {arrival_time} - "
+                        f"Response: null, Duration: {duration} - "
+                        f"Violated SLOs: {duration_info['number_of_violation']} - "
+                        f"Total duration list size: {len(duration_info['duration_list'])}")
+        else:
+            logger.info(f"VM - Total requests: {total_requests} - "
+                        f"Request {request_num + 1}/{num_of_tasks} at time {arrival_time} - "
+                        f"Response: null, Duration: {duration} - "
+                        f"Violated SLOs: {duration_info['number_of_violation']} - "
+                        f"Total duration list size: {len(duration_info['duration_list'])}")
 
-async def run_workload():
-    # Input Information
-    input_csv = lb_conf.input_csv
-    logger.info(f"Start workload with {input_csv}")
+    if service == "lambda":
+        duration_info["lambda_duration_list"].append(duration)
 
-    if USE_CASE_FOR_EXPERIMENT == "COLD_START":
-        logger.info("Only Multiple Requests at time 1 and finish")
+        if violated:
+            duration_info["number_of_violation"] += 1
+            duration_info["violated_duration_list"].append(duration)
+            duration_info["number_of_violation_from_lambda"] += 1
 
-    # Update running time since we start workload starting from now on
-    logger.info("Updating Running time before starting workload")
-    inst_info: InstanceInfoClass
-    for inst_id, inst_info in WHOLE_INSTANCE_INFO.items():
-        inst_info.running_time = datetime.datetime.now()
-    logger.info(f"\tCurrent WHOLE_INSTANCE_INFO {len(WHOLE_INSTANCE_INFO)} : {pformat(WHOLE_INSTANCE_INFO)}")
-
-    # TEST
-    # input_csv = "wits_average_130_factor_3_minute_1.csv"
-
-    # Test -> No Scaling Factor -> We don't need scaling factor
-    # if input_csv == "stable_1_minutes.csv":
-    #     logger.info("\tScaling factor is None since it's test")
-    #
-    # # Scaling Factor will be fetched from input csv
-    # else:
-    #     split_string = input_csv.split("_")
-    #     for i, s in enumerate(split_string):
-    #         if s == "factor":
-    #             scaling_factor = float(split_string[i + 1])
-    #             logger.info(f"\tScaling Factor is {int(scaling_factor)}")
-
-    # For calculation of total requests
-    total_requests = 0
-    # total_duration = 0
-    with open(input_csv) as csv_file:
-
-        # Open Reader
-        reader = csv.reader(csv_file)
-
-        # Open Client
-        conn = aiohttp.TCPConnector(limit=None)
-
-        async with aiohttp.ClientSession(connector=conn) as session:
-
-            # Job keeper
-            async_job = []
-
-            # Read workload every second
-            for idx, each_row in enumerate(reader):
-
-                # arrival_time = int(each_row[0])
-                arrival_time = idx + 1
-
-                num_tasks = int(each_row[0])
-
-                # Add request to total_requests
-                total_requests += num_tasks
-
-                # Actual Work - Send Parallel Request
-                for i in range(num_tasks):
-                    async_job.append(
-                        asyncio.create_task(
-                            send_req(
-                                session, i, arrival_time, num_tasks, total_requests
-                            )
-                        )
-                    )
-
-                # For reading csv every second
-                await asyncio.sleep(1)
-
-            # Wait for all requests to finish
-            await asyncio.gather(*async_job)
+            logger.info(f"Lambda - Total requests: {total_requests} - "
+                        f"Request {request_num + 1}/{num_of_tasks} at time {arrival_time} - "
+                        f"Response duration: {duration} - "
+                        f"Violated SLOs: {duration_info['number_of_violation']} - "
+                        f"Total duration list size: {len(duration_info['duration_list'])}")
+        else:
+            logger.info(f"Lambda - Total requests: {total_requests} - "
+                        f"Request {request_num + 1}/{num_of_tasks} at time {arrival_time} - "
+                        f"Response duration: {duration} - "
+                        f"Violated SLOs: {duration_info['number_of_violation']} - "
+                        f"Total duration list size: {len(duration_info['duration_list'])})")
 
 
 def start_workload():
-    """
-    Run workload using aysyncio
-    :return: None
-    """
+    """ Start workload"""
     asyncio.run(run_workload())
 
-    return
+
+async def run_workload():
+    """ Run workload """
+    # Set up workload information
+    input_csv = conf_dict.experiment_info.get("trace_input")
+    csv_dir = f"workload_generator/wits/{input_csv}"
+    logger.info(f"Trace Information: {input_csv}\n")
+
+    # await cold_start_before_experiments(logger, whole_instance_info)
+
+    # Update running time for instances
+    logger.info("Updating running time before starting workload")
+    for inst_id, INST_INFO in whole_instance_info.items():
+        INST_INFO.running_time = datetime.datetime.now()
+
+    # Initialize job list and retry client
+    jobs = []
+    with open(csv_dir) as csv_file:
+        reader = csv.reader(csv_file)
+        retry_options = ExponentialRetry()
+        async with RetryClient(retry_options=retry_options) as sess:
+            idx = 0
+            for each_row in reader:
+                idx += 1
+                arrival_time = idx
+                try:
+                    num_tasks = int(each_row[0])
+                except IndexError:
+                    continue
+                # Send parallel requests
+                for i in range(num_tasks):
+                    duration_info["total_requests"] += 1
+                    jobs.append(
+                        asyncio.create_task(
+                            send_request(sess, i, arrival_time, num_tasks, duration_info["total_requests"]))
+                    )
+                await asyncio.sleep(1)
+        # Wait for all requests to finish
+        await asyncio.gather(*jobs)
+
+    logger.info("Ended Workload\n")
 
 
-def get_number_of_requests_during_1_minute(balancer_ip_address, port_num=80):
-    """
-    Will return number of requests during a minute
-    """
-    # getting through nginx server to get current request
-    address_to_req = ("http://" + balancer_ip_address + ":" + str(port_num) + lb_conf.basic_status_url)
+#
+#
+def get_number_of_requests_during_1_minute():
+    """Returns the number of requests during the last minute"""
 
-    # set timeout to 2
-    try:
-        res = requests.get(address_to_req, timeout=2)
-        res_split = res.text.split()
+    num_requests_last_minute = duration_info["total_requests"] - duration_info["accumulated_request_list_every_minute"][
+        -1]
 
-    except requests.exceptions.ConnectionError as e:
-        logger.info(f"Error occurred : {e}")
-        logger.info("Check balancer ip or port")
-        logger.info("Currently setting number of requests to 0")
-        logger.info("get_number_of_requests_during_1_minute")
-        return 0
+    duration_info["accumulated_request_list_every_minute"].append(num_requests_last_minute)
 
-    else:
-        curr_val = int(res_split[res_split.index("Reading:") - 1])
-        global starting_request_number
-        num_of_requests = curr_val - starting_request_number - 1
-        starting_request_number = curr_val
-        # logger.debug(f"\tNumber of requests is {num_of_requests}")
-        logger.debug(f"\tStarting request num is now {starting_request_number}")
-        assert res.status_code == 200
-        logger.info("\tFinished getting number of requests during_1_minute")
-        return num_of_requests
+    return num_requests_last_minute
 
 
-def remove_workers(instances_with_elapsed_mins: List[InstanceInfoWithCPUClass], num_of_servers_to_terminate):
-    """
-    Only remove number of workers given in num_of_servers_to_terminate
-    """
+def remove_workers(three_mins_elapsed_instances_to_terminate: List[InstanceInfoWithCPUClass]):
+    """Remove number of workers given in num_of_servers_to_terminate"""
 
-    # logger.info(f"\t\tRemoving {num_of_servers_to_terminate} workers")
-
-    # Revealing Information
-    # logger.info(f"\t\t\tWHOLE_INSTANCE_INFO ({len(WHOLE_INSTANCE_INFO)} instances) - {WHOLE_INSTANCE_INFO}")
-
-    # Limit number of instances
-    instances_to_terminate = [i.inst_id for i in instances_with_elapsed_mins]
-
-    # For Idle Usage -> len(instances_with_elapsed_mins) > num_of_servers_to_terminate:
-    # if len(instances_with_elapsed_mins) > num_of_servers_to_terminate:
-    #     for index, instance_for_termination in enumerate(instances_with_elapsed_mins):
-    #
-    #         # if it reaches number of instances, break
-    #         instances_to_terminate.append(instance_for_termination.inst_id)
-    #
-    #         # If exceeds number of servers to terminate
-    #         if index + 1 == num_of_servers_to_terminate:
-    #             logger.info(
-    #                 f"\t\t Cannot terminate more instances -> only terminate ({num_of_servers_to_terminate}) servers")
-    #             break
+    # List instance id list
+    instances_to_terminate = [i.inst_id for i in three_mins_elapsed_instances_to_terminate]
 
     logger.info(f"\t\tinstances_to_terminate -> {instances_to_terminate}")
 
+    num_of_servers_to_terminate = len(three_mins_elapsed_instances_to_terminate)
+
     # Number of servers to remove should be less than existing servers
-    if num_of_servers_to_terminate < len(WHOLE_INSTANCE_INFO):
+    if num_of_servers_to_terminate < len(whole_instance_info):
+        remove_worker_and_terminate_instance(instances_to_terminate)
 
-        # Thread keepers
-        lb_detachers_threads = []
+    else:
+        logger.info(f"\t\tWhole instance <= instances to terminate - Leaving only 1 worker")
+        instances_to_terminate = list(whole_instance_info.keys())[1:]
+        logger.debug(f"\t\tinstances_to_terminate -> {instances_to_terminate}")
 
-        for each_inst_id in instances_to_terminate:
-            # For Consistency
-            instance_workers_lock.acquire()
-
-            # Remove inst_id from WHOLE_INSTANCE_INFO
-            logger.info(f"\t\tremoving {each_inst_id} from WHOLE_INSTANCE_INFO")
-            info_class: InstanceInfoClass = WHOLE_INSTANCE_INFO.pop(each_inst_id)
-            logger.info(f"\t\tinstance_id list from WHOLE_INSTANCE_INFO ({len(WHOLE_INSTANCE_INFO)})-"
-                        f" {WHOLE_INSTANCE_INFO.keys()}")
-
-            TERMINATED_INSTANCE_INFO[each_inst_id] = TerminatedInstanceInfoClass(info_class.vm_class_info,
-                                                                                 info_class.running_time,
-                                                                                 info_class.previously_launched_instances,
-                                                                                 info_class.number_of_elapsed_minutes,
-                                                                                 info_class.cpu_util,
-                                                                                 termination_time=datetime.datetime.now())
-
-            # info_class: InstanceInfoClass = WHOLE_INSTANCE_INFO.pop(each_inst_id)
-            # logger.info(f"\t\tinstance_id list from WHOLE_INSTANCE_INFO ({len(WHOLE_INSTANCE_INFO)})-"
-            #             f" {WHOLE_INSTANCE_INFO.keys()}")
-            logger.info(f"\t\tTERMINATED_INSTANCE_INFO ({len(TERMINATED_INSTANCE_INFO)})-"
-                        f" {TERMINATED_INSTANCE_INFO}")
-
-            # For Consistency
-            instance_workers_lock.release()
-
-            # Terminate and Make servers unavailable in LoadBalancer
-            lb_detacher = LBDetacher(info_class.vm_class_info)
-            lb_detachers_threads.append(lb_detacher)
-
-        # Parallel execution
-        logger.info("\tStart Termination")
-        for thread in lb_detachers_threads:
-            thread.start()
-
-        # Wait for threads to finish
-        for thread in lb_detachers_threads:
-            thread.join()
-        logger.info("\tFinished Termination")
-
-        logger.info(f"\tCurrent Instances Info ({len(WHOLE_INSTANCE_INFO)}) instances:"
-                    f" {pformat(WHOLE_INSTANCE_INFO)}")
-
-    elif num_of_servers_to_terminate >= len(WHOLE_INSTANCE_INFO):
-
-        logger.info(f"\t\tWorkers number cannot be less than resources that are to be removed")
-        logger.info(f"\t\tLeaving only one worker")
-
-        # Thread keepers
-        lb_detachers_threads = []
-
-        for each_inst_id in list(WHOLE_INSTANCE_INFO.keys())[1:]:
-            # For Consistency
-            instance_workers_lock.acquire()
-
-            # Remove inst_id from WHOLE_INSTANCE_INFO
-            logger.info(f"\t\t removing {each_inst_id} from WHOLE_INSTANCE_INFO")
-            info_class: InstanceInfoClass = WHOLE_INSTANCE_INFO.pop(each_inst_id)
-            logger.info(f"\t\t instance_id list from WHOLE_INSTANCE_INFO - {WHOLE_INSTANCE_INFO.keys()}")
-
-            # For Consistency
-            instance_workers_lock.release()
-
-            # Terminate and Make servers unavailable in LoadBalancer
-            lb_detacher = LBDetacher(info_class.vm_class_info)
-            lb_detachers_threads.append(lb_detacher)
-
-        # inst_info: InstanceInfoClass
-        # for inst_id, inst_info in WHOLE_INSTANCE_INFO.items():
-        #
-        #     # Find instance id in WHOLE_INSTANCE_INFO and remove info
-        #     if inst_id in instances_to_terminate:
-        #         # For Consistency
-        #         instance_workers_lock.acquire()
-        #
-        #         # Remove inst_id from WHOLE_INSTANCE_INFO
-        #         logger.info(f"\t\t removing {inst_id} from WHOLE_INSTANCE_INFO")
-        #         info_class: InstanceInfoClass = WHOLE_INSTANCE_INFO.pop(inst_id)
-        #         logger.info(f"\t\t instance_id list from WHOLE_INSTANCE_INFO - {WHOLE_INSTANCE_INFO.keys()}")
-        #
-        #         # For Consistency
-        #         instance_workers_lock.release()
-        #
-        #         # Terminate and Make servers unavailable in LoadBalancer
-        #         lb_detacher = LBDetacher(info_class.vm_class_info)
-        #         lb_detachers_threads.append(lb_detacher)
-
-        # Parallel execution
-        for thread in lb_detachers_threads:
-            thread.start()
-        logger.info("\t\t\t\tStarted Termination")
-
-        # Wait for threads to finish
-
-        for thread in lb_detachers_threads:
-            thread.join()
-        logger.info("\t\t\t\tFinished Termination")
+        remove_worker_and_terminate_instance(instances_to_terminate)
 
     return
 
 
-def determine_num_of_excess_servers(num_of_requests, num_of_vm, arrival_rate, duration):
-    # logger.info("\t\tStart determine_num_of_excess_servers")
+def remove_worker_and_terminate_instance(instances_to_terminate):
+    # Thread keepers
+    lb_detachers_threads = []
+
+    for each_inst_id in instances_to_terminate:
+        # For Consistency
+        instance_workers_lock.acquire()
+
+        # Remove inst_id from whole_instance_info
+        logger.info(f"\t\tRemoving {each_inst_id} from whole_instance_info")
+        info_class: InstanceInfoClass = whole_instance_info.pop(each_inst_id)
+        logger.info(f"\t\t\tCurrent ec2_id list from whole_instance_info ({len(whole_instance_info)})-"
+                    f" {whole_instance_info.keys()}")
+
+        terminated_instance_info[each_inst_id] = TerminatedInstanceInfoClass(info_class.vm_class_info,
+                                                                             info_class.running_time,
+                                                                             info_class.recent_instance,
+                                                                             info_class.number_of_elapsed_minutes,
+                                                                             info_class.cpu_util,
+                                                                             termination_time=datetime.datetime.now())
+        for idx, (inst_id, info) in enumerate(terminated_instance_info.items()):
+            logger.debug(f"\t\t {idx + 1}/{len(terminated_instance_info)} terminated_inst {inst_id} - {info}")
+
+        # For Consistency
+        instance_workers_lock.release()
+
+        # Update public ip in Lambda & Terminate & Make servers unavailable in LoadBalancer
+        lb_detacher = LBDetacher(info_class.vm_class_info)
+        lb_detachers_threads.append(lb_detacher)
+
+    # Parallel execution
+    logger.info("\tStart Servers Unavailable & Termination")
+    for thread in lb_detachers_threads:
+        thread.start()
+
+    # Wait for threads to finish
+    for thread in lb_detachers_threads:
+        thread.join()
+
+    logger.info("\tFinished Servers Unavailable & Termination")
+
+    # Update lambda env for mongodb after termination of all instances
+    # update_ec2_private_ip_env_in_lambda(lambda_arn_list_for_mongodb)
+
+
+def determine_num_of_excess_servers(num_of_requests, num_of_vm, max_reqs, duration):
+    """Return num of excess servers -> could be negative or positive"""
 
     # Initial and Exception Case
     if num_of_requests == 0:
         logger.info("\t\tSkipping since number of requests is 0")
         return 0
 
-    if USE_CASE_FOR_EXPERIMENT == "MICROBLEND":
-        """
-        Assume newly launched VM can serve as if it is already running from the start
-        """
+    experiment_case = conf_dict.experiment_info.get("experiment_case")
 
-        # Maximum Number of Requests for a minute which is num of servers * duration
-        max_reqs_per_minute = num_of_vm * arrival_rate * duration
-        logger.info(f"\t\t\tmax_reqs_with_{int(num_of_vm)}_servers : {max_reqs_per_minute}")
+    if experiment_case in ["all_lambda", "test_lambda", "cold_start"]:
+        logger.info("\t\t\tSkipping scaling decision for Lambda experiments")
+        return 0
 
-        # Subtract max_reqs_per_minute to current number of requests
-        total_excess = num_of_requests - max_reqs_per_minute
-        logger.info(f"\t\t\tTotal_excess is {total_excess}")
-
-        # Divide with arrival rate to get number of servers====
-        logger.info("\t[SCALING POLICY] - MICROBLEND")
-        num_of_servers_to_launch = math.ceil(total_excess / (arrival_rate * duration))
-
-        return num_of_servers_to_launch
+    logger.info("\t\t\tDetermining excess servers to launch/terminate")
 
     # Since there is a time for launching instances we have to calculate the gap
-    elif USE_CASE_FOR_EXPERIMENT in ["ALL_VM", "OVERPROVISION"]:
+    if experiment_case in ["all_vm", "overprovision"]:
 
         # Add partial requests for newly launched instances + Add requests for remaining numbers
-        max_reqs_per_minute = get_maximum_requests_for_vms(arrival_rate, duration, num_of_vm)
+        max_reqs_per_minute = get_maximum_requests_for_vms(max_reqs, duration, num_of_vm)
         logger.info(f"\t\t\tmax_reqs_with_{int(num_of_vm)}_servers : {max_reqs_per_minute}")
 
         # Get total excess - Subtract max nums to current number of requests
-        total_excess = num_of_requests - max_reqs_per_minute
-        logger.info(f"\t\t\tTotal_excess is {total_excess}")
+        total_excess_requests = num_of_requests - max_reqs_per_minute
+        logger.info(f"\t\t\tTotal_excess is {total_excess_requests}")
 
         # OVER_PROVISION -> 2x resources
-        if OVER_PROVISION:
+        if experiment_case == "overprovision":
 
             logger.info("\t\t\t[SCALING POLICY] - OVERPROVISION")
 
             # Number of servers to use -> could be positive or negative number
-            num_of_servers_to_make = math.ceil(total_excess / (arrival_rate * duration))
+            num_of_servers_to_make = math.ceil(total_excess_requests / (max_reqs * duration))
 
             if num_of_servers_to_make >= 0:
                 num_of_servers_to_launch = 2 * num_of_servers_to_make
+                logger.info(f"\t\t\tExcess servers: {num_of_servers_to_launch}")
                 return num_of_servers_to_launch
 
             # If removing workers or no provision necessary
-            elif num_of_servers_to_make < 0:
+            else:
                 num_of_servers_to_launch = num_of_servers_to_make
+                logger.info(f"\t\t\tServers to terminate: {abs(num_of_servers_to_launch)}")
                 return num_of_servers_to_launch
 
-        # NO OVER_PROVISION
-        elif not OVER_PROVISION:
+            # NO OVER_PROVISION
+        else:
             logger.info("\t\t\t[SCALING POLICY] - NO OVERPROVISION ")
-            num_of_servers_to_launch = math.ceil(total_excess / (arrival_rate * duration))
-
+            num_of_servers_to_launch = math.ceil(total_excess_requests / (max_reqs * duration))
+            logger.info(f"\t\t\tExcess servers: {num_of_servers_to_launch}")
             return num_of_servers_to_launch
 
-    logger.info("\t\tFinished determine_num_of_excess_servers")
+    elif experiment_case == "microblend":
+        """
+        Assume newly launched VM can serve as if it is already running from the start
+        """
+        logger.info("\t\t\t use_case_for_experiment is splice -> recent launched VM can serve from beginning")
 
+        # Maximum Number of Requests for a minute which is num of servers * duration
+        max_reqs_per_minute = num_of_vm * max_reqs * duration
+        logger.info(f"\t\t\tmax_reqs_with_{int(num_of_vm)}_servers : {max_reqs_per_minute}")
 
-@dataclass
-class PreviouslyLaunchedInstancesClass:
-    instance_id: str
-    running_time: datetime.datetime
-    gap_in_seconds: float
+        # Subtract max_reqs_per_minute to current number of requests
+        total_excess_requests = num_of_requests - max_reqs_per_minute
+        logger.info(f"\t\t\tTotal_excess is {total_excess_requests}")
+
+        # Divide with arrival rate to get number of servers====
+        logger.info("\t[SCALING POLICY] - MicroBlend")
+        num_of_servers_to_launch = math.ceil(total_excess_requests / (max_reqs * duration))
+
+        return num_of_servers_to_launch
 
 
 def get_maximum_requests_for_vms(arrival_rate, duration, num_of_vm):
-    """
-    Depending on the experiment type, add partial requests for previously launched instances
+    """Depending on the experiment type, add partial requests for previously launched instances
     1. Iterate and find previously launched instances
     2. Calculate Gap and get partial requests depending on the gap
     """
 
     logger.info("\t\t\tGet Maximum Requests including partial requests for previously launched instances")
 
-    previously_launched_instances_list = []
+    recently_launched_instances = [
+        info for info in whole_instance_info.values()
+        if info.recent_instance and (datetime.datetime.now() - info.running_time).total_seconds() <= 57
+    ]
 
-    for i, (inst_id, info) in enumerate(WHOLE_INSTANCE_INFO.items()):
-        if info.previously_launched_instances:
+    req_for_recent_instances = arrival_rate * sum(
+        (datetime.datetime.now() - info.running_time).total_seconds()
+        for info in recently_launched_instances
+    )
 
-            logger.info(f"\t\t\t{i + 1}th instance - {inst_id}'s running time is {info.running_time}")
+    req_except_recent_instances = (num_of_vm - len(recently_launched_instances)) * arrival_rate * duration
 
-            # Gap in datetime format
-            gap_between_running_time = datetime.datetime.now() - info.running_time
+    max_reqs_per_minute = req_for_recent_instances + req_except_recent_instances
 
-            # Gap in seconds
-            gap_in_seconds = float(gap_between_running_time.total_seconds())
-
-            logger.info(f"\t\t\t{i + 1}th instance - {inst_id} gap in seconds is {gap_in_seconds}")
-
-            # if gap is negative since it takes more than 60 -> Skip
-            if gap_in_seconds > 57:
-                logger.info(
-                    f"\t\t\t{i}th instance - {inst_id} gap in seconds is {gap_in_seconds} -> skip since gap is > 60")
-                continue
-
-            # Exception -> When Value is 1
-            if gap_in_seconds is None:
-                prev_inst_to_add = PreviouslyLaunchedInstancesClass(inst_id, info.running_time, 0)
-                previously_launched_instances_list.append(prev_inst_to_add)
-
-            else:
-                prev_inst_to_add = PreviouslyLaunchedInstancesClass(inst_id, info.running_time, gap_in_seconds)
-                previously_launched_instances_list.append(prev_inst_to_add)
-
-            logger.info(f"\t\t\tpreviously_launched_instances_list with gap : {previously_launched_instances_list}")
-
-        else:
-            logger.info(f"\t\t\t{i + 1}th instance - Not Previous Instances")
-
-    # Reqs for previous instances -> gaps * arrival rate, since gaps is for one minute
-    req_for_previous_instances = arrival_rate * (sum([i.gap_in_seconds for i in previously_launched_instances_list]))
-    logger.info(f"\t\t\treq_for_previous_instances : {req_for_previous_instances}")
-
-    # Reqs for remaining instances
-    req_except_recent_instances = ((num_of_vm - len(previously_launched_instances_list)) * arrival_rate * duration)
-    logger.info(f"\t\t\treq_except_recent_instances : {req_except_recent_instances}")
-
-    # Sum up above 2 variables
-    max_reqs_per_minute = req_for_previous_instances + req_except_recent_instances
-    logger.info(f"\t\t\tmax_reqs (total) : {max_reqs_per_minute}")
+    logger.info(f"\t\t\ttotal request for recent instances: {req_for_recent_instances}")
+    logger.info(f"\t\t\ttotal request for non-recent instances: {req_except_recent_instances}")
+    logger.info(f"\t\t\tmax requests per minute: {max_reqs_per_minute}")
 
     return max_reqs_per_minute
 
 
-# def get_gaps_for_newly_launched_instances():
-#     gap_in_seconds_list = []
-#
-#     # for inst_id, inst_info in WHOLE_INSTANCE_INFO.items():
-#     #     if inst_info.get('pre')
-#     for inst_id in INITIAL_OR_LAUNCHED_1_MINUTE_AGO_INSTANCES:
-#         inst_info = INSTANCE_DICT_INFO.get(inst_id)
-#         running_time = inst_info.get("running_time")
-#
-#         # Due to provisioning taking more than 1 minute
-#         if inst_info is None:
-#             continue
-#
-#         else:
-#             logger.info(f"\t\t{inst_id} running_time is {running_time}")
-#             gap_between_running_time = datetime.datetime.now() - running_time
-#             gap_in_seconds = float(gap_between_running_time.total_seconds())
-#             logger.info(f"\t\t{inst_id} gap in seconds is {gap_in_seconds}")
-#
-#             # Value is 1 -> becomes None
-#             if gap_in_seconds is None:
-#                 gap_in_seconds_list.append(0)
-#             else:
-#                 gap_in_seconds_list.append(int(gap_in_seconds))
-#
-#     return gap_in_seconds_list
+def scale_down_resources_based_on_lowest_cpu_util(num_of_excess_server) -> None:
+    """Scale down resources based on lowest cpu utilization"""
 
-def make_autoscaling_decision_and_provision():
-    logger.info("Make Autoscaling Decision")
-
-    # Increment the number of elapsed time by one
-    logger.info(f"\tIncrement number of elapsed time by 1")
-    increment_all_instances_number_of_elapsed_mins_by_one()
-
-    # Get statics for insanity check
-    get_statistics(show_all_durations=False)
-
-    # Get number of arrival rate for duration
-    logger.info(f"\tGet number of arrival rate for duration")
-    number_of_requests = get_number_of_requests_during_1_minute(balancer_ip_address=lb_ip)
-    logger.info(f"\tNumber of Requests from LB is {number_of_requests}")
-
-    # Get how many server we need to provision
-    logger.info("\tDetermine number of excess servers")
-    num_of_excess_server = determine_num_of_excess_servers(
-        num_of_requests=number_of_requests,
-        num_of_vm=len(WHOLE_INSTANCE_INFO),
-        arrival_rate=lb_conf.max_requests_per_sec_per_vm,
-        duration=lb_conf.duration,
-    )
-    logger.info(f"\t\t\tNum of excess server is {num_of_excess_server}")
-
-    if REQUEST_TYPE == "lambda":
-        logger.info("\t\tLambda -> No Provisioning needed")
-        return
-
-    # Unless using ALL LAMBDA -> Provision Resources
-    else:
-
-        # Need to scale up
-        if num_of_excess_server > 0:
-            scale_up_resources(num_of_excess_server)
-
-        # No instances to remove -> terminate idle instances
-        elif num_of_excess_server == 0:
-            terminate_idle_resources()
-
-        # Terminate instances with lowest cpu util
-        elif num_of_excess_server < 0:
-
-            scale_down_resources_based_on_lowest_cpu_util(num_of_excess_server)
-
-    logger.info(f"\t\tEnd of Scaling Policy (But function inside scaling policy could be running).")
-
-    return
-
-
-def scale_down_resources_based_on_lowest_cpu_util(num_of_excess_server):
     # Number of servers to scale in  -> number of excess servers
     num_of_servers_to_scale_in = abs(num_of_excess_server)
     logger.info(f"\tRemove {num_of_servers_to_scale_in} server")
 
     # Set previous instance to False because at this time we didn't provision any instances
     logger.info(f"\tDoes not provision -> Setting previous instance's to False")
-    for _, inst_info in WHOLE_INSTANCE_INFO.items():
-        inst_info.previously_launched_instances = False
+    for _, instance_information in whole_instance_info.items():
+        instance_information.recent_instance = False
 
     # Insanity Check
-    logger.debug(f"\tWHOLE_INSTANCE_INFO ({len(WHOLE_INSTANCE_INFO)}) is {pformat(WHOLE_INSTANCE_INFO)}")
+    print_whole_instance_info()
 
     # Update and bring instances with sorted cpu utilization
     logger.info("\tScale in - choose the instances depending on lowest cpu util")
-    instances_to_scale_in: List[InstanceInfoWithCPUClass] = get_instances_to_scale_in(WHOLE_INSTANCE_INFO, lowest=True)
+    instances_to_scale_in: List[InstanceInfoWithCPUClass] = get_instances_to_scale_in(whole_instance_info, lowest=True)
 
+    # Show Instances Candidate
     try:
         logger.info(f"\t\tInstance Candidates to Scale In ({len(instances_to_scale_in)}): {instances_to_scale_in}")
     except ValueError:
         logger.exception("Error with showing instances to scale in")
 
-    # Choose the first {num_of_servers_to_scale_in} instances
     logger.info(f"\t\tChoose the first {num_of_servers_to_scale_in} instances")
-    sliced_instances_to_scale_in = instances_to_scale_in[:num_of_servers_to_scale_in]
-    logger.info(f"\t\tinstances to terminate is {sliced_instances_to_scale_in}")
+    instances_to_terminate = instances_to_scale_in[:num_of_servers_to_scale_in]
+    logger.info(f"\t\tinstances to terminate is {instances_to_terminate}")
 
     # Remove workers
-    t_for_removing_resource = threading.Thread(target=remove_workers,
-                                               args=[sliced_instances_to_scale_in, num_of_servers_to_scale_in])
+    t_for_removing_resource = threading.Thread(target=remove_workers, args=[instances_to_terminate])
     t_for_removing_resource.start()
 
 
-def terminate_idle_resources():
-    # Set previous instance to False because at this time we didn't provision any instances
+def terminate_idle_resources() -> None:
+    """Set previous instance to False because at this time we didn't provision any instances"""
     logger.info(f"\t\tDoes not provision -> Setting previous instance's to False")
-    for _, inst_info in WHOLE_INSTANCE_INFO.items():
-        inst_info.previously_launched_instances = False
+    for _, instance_information in whole_instance_info.items():
+        instance_information.recent_instance = False
 
     # Insanity Check
-    logger.debug(f"\t\tWHOLE_INSTANCE_INFO {len(WHOLE_INSTANCE_INFO)} is {pformat(WHOLE_INSTANCE_INFO)}")
+    print_whole_instance_info()
 
     # Update and Bring instances with cpu utilization less than 10 percent
     logger.info("\tDecide if we need to scale in depending on cpu util")
-    instances_to_scale_in: List[InstanceInfoWithCPUClass] = get_instances_to_scale_in(WHOLE_INSTANCE_INFO)
+    instances_to_scale_in: List[InstanceInfoWithCPUClass] = get_instances_to_scale_in(whole_instance_info)
 
     # Show Instances Candidate
     try:
@@ -1849,651 +1222,378 @@ def terminate_idle_resources():
 
     # If there are instances to scale-in
     if instances_to_scale_in:
-
         logger.info("\tThere exist idle instances -> Scale in")
-
-        #  candidate instances to scale in < number of excess servers  -> number of excess servers
-        # if len(instances_to_scale_in) < abs(num_of_excess_server):
-
-        # Use instances to scale in
         num_of_servers_to_scale_in = len(instances_to_scale_in)
         logger.info(f"\tRemove {num_of_servers_to_scale_in} servers")
-
         # Remove workers
-        t_for_removing_resource = threading.Thread(target=remove_workers,
-                                                   args=[instances_to_scale_in, num_of_servers_to_scale_in])
+        t_for_removing_resource = threading.Thread(target=remove_workers, args=[instances_to_scale_in])
         t_for_removing_resource.start()
-
-        #  candidate instances to scale in > number of excess servers  -> candidate instances to scale in
-        # elif len(instances_to_scale_in) >= abs(num_of_excess_server):
-
-        # Use instances to scale in
-        # num_of_servers_to_scale_in = abs(num_of_excess_server)
-        # sliced_instances_to_scale_in = instances_to_scale_in[:num_of_servers_to_scale_in]
-        # logger.info(f"\tRemove {num_of_servers_to_scale_in} server")
-
-        # Remove workers
-        # t_for_removing_resource = threading.Thread(target=remove_workers,
-        #                                            args=[instances_to_scale_in, num_of_servers_to_scale_in])
-        # t_for_removing_resource.start()
-
     else:
-
-        logger.info("\t\tNo idle resources")
+        logger.info("\tNo idle resources to remove")
 
 
 def scale_up_resources(num_of_excess_server):
+    """Scale up & ways are vm (traditional) hybrid (splice)"""
+
+    # Set previous instances status False since we will be spawning new resources
     logger.info(f"\t\t\tSet previous instances to False because we are launching new one")
-    for _, inst_info in WHOLE_INSTANCE_INFO.items():
-        inst_info.previously_launched_instances = False
+    for _, inst_info in whole_instance_info.items():
+        inst_info.recent_instance = False
 
-    # Case 1 ALL VM
-    if PROVISIONING_METHOD == "ONLY_VM":
-        #  Bring new resources and add instances to WHOLE_INSTANCE_INFO
-        t_for_new_resource = threading.Thread(target=bring_new_resource, args=[num_of_excess_server, False])
-        t_for_new_resource.start()
-        t_for_new_resource.join()
+    # Case 1 ALL VM (Traditional)
+    if provisioning_method == "vm":
+        #  Bring new resources and add instances to whole_instance_info
+        t = threading.Thread(target=launch_ec2_and_add_to_loadbalancer, args=[num_of_excess_server])
+        t.start()
+        t.join()
 
-        logger.debug(f"\tCurrent Instances Info ({len(WHOLE_INSTANCE_INFO)}) instances:"
-                     f" {pformat(WHOLE_INSTANCE_INFO)}")
-
-    # Case 2 Use Lambda when provisioning
-    if PROVISIONING_METHOD == "Hybrid":
-        t_for_new_resource = threading.Thread(target=bring_new_resource, args=[num_of_excess_server])
+    # Case 2 Use Lambda when provisioning (splice)
+    if provisioning_method == "microblend":
+        t = threading.Thread(target=launch_ec2_and_add_to_loadbalancer, args=[num_of_excess_server])
 
         # Use lambda after launching instances
-        t_for_new_resource.start()
+        t.start()
         change_service_type_to_lambda()
 
-        # After provision, change back to using VM
-        t_for_new_resource.join()
+        # After launching ec2 and adding to loadbalancer, change back to using VM
+        t.join()
         change_service_type_to_vm()
 
-        # Insanity Check
-        logger.debug(f"\t\tCurrent Instances Info ({len(WHOLE_INSTANCE_INFO)}) instances:"
-                     f" {pformat(WHOLE_INSTANCE_INFO)}")
-    """
-                # Not at this moment
-                # Case 3 Provisioning with compiler making hybrid code and Lambda
-                # if should_off_load and ALREADY_OFFLOAD is False:
-                #     # logging.debug(ALREADY_OFFLOAD)
-                #     thread_for_offloading = threading.Thread(
-                #         target=compiler.process_while_deployment, args=(whole_info,),
-                #     )
-                #
-                #     t_for_new_resource.start()
-                #     thread_for_offloading.start()
-                #     thread_for_offloading.join()
-                #     run_on_lambda()
-                #     t_for_new_resource.join()
-                #     run_on_vm()
-                #     ALREADY_OFFLOAD = True
-                """
+    logger.debug(f"\tCurrent Instances Info ({len(whole_instance_info)}) instances: {pformat(whole_instance_info)}")
+
+    # Update Ip Address in Lambda for interacting with MongoDB
+    # update_ec2_private_ip_env_in_lambda(lambda_arn_list_for_mongodb)
+
+    # Insanity Check
+    print_whole_instance_info()
 
 
 def increment_all_instances_number_of_elapsed_mins_by_one():
+    """Increment elapsed time by one -> needed when terminating instances"""
     inst_info: InstanceInfoClass
-    for inst_id, inst_info in WHOLE_INSTANCE_INFO.items():
+    for inst_id, inst_info in whole_instance_info.items():
         inst_info.number_of_elapsed_minutes += 1
-    # logger.info(f"\tCurrent Instance Info ({len(WHOLE_INSTANCE_INFO)}) instances: {pformat(WHOLE_INSTANCE_INFO)}")
 
 
+#
+#
 def start_policy():
-    """
-    Do autoscaling decision every duration
-    """
+    """Autoscale decision every duration"""
 
-    start_time = time.time()
     logger.info("Start Scaling Policy")
 
-    # Skip if use_case is for test
-    use_case_of_test = ["ALL_LAMBDA", "TEST_FOR_1_MINUTE_VM", "COLD_START"]
-    if USE_CASE_FOR_EXPERIMENT in use_case_of_test:
+    # Skip when use_case is for test
+    experiment_case = conf_dict.experiment_info.get("experiment_case")
+    logger.debug(f"\tExperiment Case: {experiment_case}")
+
+    policy_duration = int(conf_dict.experiment_info.get("policy_duration"))
+
+    if experiment_case in ["all_lambda", "test_lambda", "cold_start"]:
         logger.info("\t ALL_LAMBDA, TEST -> Skipping Scaling Policy")
         return
 
     else:
+        start_time = time.time()
+        while not index_for_stopping_scaling_policy:
+            time.sleep(4)  # for test
 
-        # rt = RepeatedTimer(60, make_autoscaling_decision_and_provision) # it auto-starts, no need of rt.start()
-        # try:
-        #     time.sleep(DURATION_IN_MIN * 60)
-        # autoscaling_task = threading.Thread(target=make_autoscaling_decision_and_provision)
-        # autoscaling_task.start()
-        # sleep(5) # your long-running job goes here...
-        # finally:
-        #     rt.stop()
+            elapsed_time = time.time() - start_time
+            sleep_time = policy_duration - (elapsed_time % policy_duration)
+            logger.debug(f"\twake up after {sleep_time:.2f}")
 
-        while True:
+            # time.sleep(policy_duration - ((time.time() - start_time) % policy_duration))
 
-            # Wake up after configured duration ====
-            # time.sleep(lb_conf.duration)
-            time.sleep(lb_conf.duration - ((time.time() - start_time) % lb_conf.duration))
-
-            """
-            # TODO: (For Test)
-            # time.sleep(2)
-            """
-
-            # === INDEX_FOR_STOPPING_SCALING_POLICY is True after workload -> finish policy
-            if INDEX_FOR_STOPPING_SCALING_POLICY:
-                break
-
-            # Make autoscaling decision ====
+            # Make autoscaling decision & Run in background
             autoscaling_task = threading.Thread(target=make_autoscaling_decision_and_provision)
-
-            # Run in background ====
             autoscaling_task.start()
 
-            """
-            # TODO: (For Test)
-            # autoscaling_task.join()
-            # break
-            """
+            autoscaling_task.join()  # For test
+            break  # for test
 
     return
 
 
-# noinspection PyUnusedLocal
-def arrival_rate_decision(metrics_from_lb, arrival_rate) -> bool:
-    # TODO : Later
-    pass
-    # # Save it to metrics_from_lb
-    # metrics_from_lb.arrival_rate_operand = arrival_rate
-    #
-    # comparison_ops = {
-    #     "<": operator.lt,
-    #     "<=": operator.le,
-    #     ">": operator.gt,
-    #     ">=": operator.ge,
-    # }
-    #
-    # if whole_info.offloading_whole_application:
-    #     logger.info("Compare with whole application metrics")
-    #     annotation_metrics = whole_info.metrics_for_whole_application
-    #
-    #     # If metric of arrival rate exists
-    #     if metrics_from_lb.__getattribute__("arrival_rate"):
-    #         arrival_rate_metric_from_lb = metrics_from_lb.__getattribute__(
-    #             "arrival_rate"
-    #         )
-    #
-    #         arrival_rate_metric_from_user = annotation_metrics.arrival_rate_operand
-    #         arrival_rate_operator_user = annotation_metrics.arrival_rate_operator
-    #
-    #         if comparison_ops[arrival_rate_operator_user](
-    #                 arrival_rate_metric_from_lb, arrival_rate_metric_from_user
-    #         ):
-    #             return True
-    #
-    #     return False
-    #
-    # # logger.info(
-    # #     f"User Annotation from compiler Information : \n"
-    # #     f"{pformat(dict(whole_info.services_for_function))}"
-    # # )
-    #
-    # # Fetch function with rules
-    # services_for_function_for_loadbalancer = whole_info.parsed_function_info_for_faas
-    # # logger.info(
-    # #     f"Scaling policy with metrics_from_lb : \n"
-    # #     f"{pformat(dict(whole_info.services_for_function_for_loadbalancer))}"
-    # # )
-    #
-    # service_and_metrics: FunctionWithServiceCandidate
-    # for (
-    #         function_name,
-    #         service_and_metrics,
-    # ) in services_for_function_for_loadbalancer.items():
-    #
-    #     service_for_function = service_and_metrics.service_candidate
-    #     # Consider service contains Lambda for now
-    #
-    #     if service_for_function in ["Lambda", "Both"]:
-    #
-    #         # e.g., {'arrival_rate': [5, '>=']})
-    #         rules_with_function: dict = service_and_metrics.rules_for_scaling_policy
-    #
-    #         if not rules_with_function:  # Dict is empty
-    #             continue
-    #
-    #         for (
-    #                 metric_name,
-    #                 metric_and_operator_from_user,
-    #         ) in rules_with_function.items():
-    #
-    #             # Metric from loadbalancer has contents
-    #             if metrics_from_lb.__getattribute__(metric_name):
-    #
-    #                 metric_from_lb = metrics_from_lb.__getattribute__(metric_name)
-    #
-    #                 # Fetch function metric with comparison operator
-    #                 func_metric_from_user = metric_and_operator_from_user[0]
-    #                 func_operator_from_user = metric_and_operator_from_user[1]
-    #
-    #                 # Do comparison with metric from loadbalancer and function
-    #
-    #                 if comparison_ops[func_operator_from_user](
-    #                         metric_from_lb, func_metric_from_user
-    #                 ):  # True -> it is lambda
-    #                     continue
-    #
-    #                 else:  # If False -> remove Lambda
-    #                     whole_info.services_for_function[service_for_function].remove(
-    #                         function_name
-    #                     )
-    #                     whole_info.services_for_function["VM"].append(function_name)
-    #
-    # # logger.info(
-    # #     f"Service with Functions after decision : \n"
-    # #     f"{pformat(dict(whole_info.services_for_function))}"
-    # # )
-    #
-    # # sys.exit(getframeinfo(currentframe()))
-    # return True
+def make_autoscaling_decision_and_provision():
+    """Decide number of servers to spawn/terminate & remove workers from LoadBalancer"""
+
+    # logger.debug("inside function")
+    # time.sleep(3)
+
+    while not index_for_stopping_scaling_policy:
+
+        logger.info("Make Autoscaling Decision")
+
+        # time.sleep(2)  # for test
+        # return
+
+        logger.info(f"\tIncrement number of elapsed time by 1")
+        increment_all_instances_number_of_elapsed_mins_by_one()
+        get_statistics()
+
+        logger.info(f"\tGet number of arrival rate for duration")
+        number_of_requests = get_number_of_requests_during_1_minute()
+        logger.info(f"\tNumber of Total Requests for previous 1 minute is {number_of_requests}")
+
+        logger.info("\tDetermine number of excess servers")
+        num_of_vm = len(whole_instance_info)
+        arrival_rate = int(conf_dict.experiment_info["max_reqs_per_minute_per_vm"])
+        policy_duration = int(conf_dict.experiment_info["policy_duration"])
+
+        # logger.debug(whole_instance_info)
+        # logger.debug(max_reqs_per_minute_per_vm)
+        num_of_excess_server = determine_num_of_excess_servers(number_of_requests, num_of_vm, arrival_rate,
+                                                               policy_duration)
+        logger.debug(f"\t\tNum of excess server is {num_of_excess_server}")
+
+        num_of_excess_server = 0  # for test
+
+        # Need to scale up
+        if num_of_excess_server > 0:
+            scale_up_resources(num_of_excess_server)
+
+        # No instances to remove -> terminate idle instances
+        elif num_of_excess_server == 0:
+            terminate_idle_resources()
+
+        # Terminate instances with the lowest cpu utilization
+        elif num_of_excess_server < 0:
+            scale_down_resources_based_on_lowest_cpu_util(num_of_excess_server)
+
+        logger.info(f"\tEnd of Scaling Policy (But function inside scaling policy could be running).")
+
+        return
 
 
 def copy_result_log():
-    logger.info(f"Copying result")
+    logger.info("Copying result")
 
-    # Copy all the logging
-    log_folder = module_conf.result_logfile_folder
-    result_file_format = "coco_result"
-
-    # Copy result in this directory
+    log_folder = conf_dict.experiment_info.get("result_dir")
+    result_file_format = "experiment_result"
     log_list = glob.glob(f"{log_folder}/{result_file_format}_*.log")
-    src_file = os.path.join(log_folder, "microblend_result.log")
-    try:
-        if RESULT_LOG_NAME:
-            log_to_copy = (
-                f"{log_folder}/"
-                f"{result_file_format}_{len(log_list) + 2}_{RESULT_LOG_NAME}.log"
-            )
-            logger.info(f"\tWriting to {log_to_copy}")
-            copyfile(src_file, log_to_copy)
+    number_of_files_in_log = len(log_list)
 
-    except NameError as e:
-        logger.info(f"Exception {e} happened")
+    logger.info(f"Number of log files: {number_of_files_in_log}")
 
-        log_to_copy = f"{log_folder}/" f"{result_file_format}_{len(log_list) + 2}.log"
+    if result_log_file_name:
+        log_to_copy = f"{log_folder}/{result_file_format}_{number_of_files_in_log + 1}_{result_log_file_name}.log"
+    else:
+        try:
+            log_to_copy = f"{log_folder}/{result_file_format}_{number_of_files_in_log + 1}.log"
+        except NameError as e:
+            logger.info(f"Exception {e} happened")
+            log_to_copy = f"{log_folder}/{result_file_format}_{len(log_list) + 2}.log"
 
-        logger.info(f"\tWriting to {log_to_copy}")
-        copyfile(src_file, log_to_copy)
-
-
-def copy_server_log():
-    """
-       Copy worker (servers) information
-    """
-    logger.info("Copy worker (servers) information")
-    workers_folder = module_conf.worker_log_folder
-    worker_file_format = "workers"
-
-    workers_info_list = glob.glob(f"{workers_folder}/{worker_file_format}_*.json")
-
-    src_file = os.path.join(workers_folder, "workers.json")
-
-    new_file_to_write = (
-        f"{workers_folder}/{worker_file_format}_"f"{len(workers_info_list) + 1}.json"
-    )
-
-    logger.info(f"\tWriting to {new_file_to_write}")
-
-    copyfile(src_file, new_file_to_write)
-
-
-def change_service_type_to_lambda():
-    logger.info("Run on Lambda")
-    global REQUEST_TYPE
-    REQUEST_TYPE = "lambda"
+    logger.info(f"Writing to {log_to_copy}")
+    copyfile(result_log_with_dir, log_to_copy)
 
 
 def change_service_type_to_vm():
+    """Change service type to VM"""
+    global request_type
+
+    request_type = "vm"
     logger.info("Run on VM")
-    global REQUEST_TYPE
-    REQUEST_TYPE = "vm"
+
+
+def change_service_type_to_lambda():
+    """Change service type to lambda"""
+    global request_type
+
+    request_type = "lambda"
+    logger.info(f"Run on Lambda")
+
+
+def get_average_cpu_for_ec2_instance(client, ec2_id, index):
+    """Get average CPU utilization for EC2 instance"""
+    try:
+        response = client.get_metric_statistics(
+            Namespace="AWS/EC2",
+            MetricName="CPUUtilization",
+            Dimensions=[{"Name": "InstanceId", "Value": ec2_id}],
+            StartTime=datetime.datetime.utcnow() - datetime.timedelta(seconds=180),
+            EndTime=datetime.datetime.utcnow(),
+            Period=30,
+            Statistics=["Average"]
+        )
+    except ValueError:
+        logger.exception(f"\t\t\t\t\texception happened")
+        return 0
+
+    # Get list of CPU utilization every minute
+    cpu_list_per_min = [x.get("Average") for x in response["Datapoints"]]
+    logger.info(f"\t\t\tcpu_list_per_min of {ec2_id} ({index + 1}) is {cpu_list_per_min}")
+
+    try:
+        # Get average of CPU utilization
+        average_cpu_per_instance = sum(cpu_list_per_min) / len(cpu_list_per_min)
+
+    except ZeroDivisionError as e:
+        logger.info(f"\t\t\tException {e} -> setting CPU utilization to 0 ")
+        average_cpu_per_instance = 0
+
+    return average_cpu_per_instance
 
 
 def get_instances_to_scale_in(whole_inst_info: dict, lowest=False) -> List[InstanceInfoWithCPUClass]:
-    """
-    get cpu utilization for 3 minutes for all instances
-    Arguments - WHOLE_INSTANCE_INFO
-    @rtype: list
-    """
+    """get cpu utilization for 3 minutes for all instances"""
 
-    global WHOLE_INSTANCE_INFO
+    global whole_instance_info, cloudwatch_client
 
-    # Bring all instances with sorted lowest cpu util
+    instances_to_scale_in = []
+
+    for i, (inst_id, inst_information) in enumerate(whole_inst_info.items()):
+        number_of_elapsed_minutes = inst_information.number_of_elapsed_minutes
+
+        if number_of_elapsed_minutes < 3:
+            logger.info(f"\t\t{i + 1}th Instance {inst_id}'s elapsed time is less than 3 ")
+            continue
+
+        cpu_utilization = get_average_cpu_for_ec2_instance(cloudwatch_client, inst_id, i)
+        # logger.info(f"\t\t{i + 1}th Instance {inst_id}'s cpu util is {cpu_utilization}")
+        inst_information.cpu_util = cpu_utilization
+
+        if lowest:
+            instances_to_scale_in.append(InstanceInfoWithCPUClass(inst_id, cpu_utilization))
+        elif cpu_utilization <= 10:
+            logger.info(f"\t\t{i + 1}th Instance {inst_id}'s cpu util is less than 10")
+            instances_to_scale_in.append(InstanceInfoWithCPUClass(inst_id, cpu_utilization))
+
     if lowest:
-        logger.info(f"\t\tSort instances from lowest cpu to highest cpu")
+        logger.info("\t\tSort instances from lowest cpu to highest cpu")
+        instances_to_scale_in.sort(key=lambda x: x.cpu_util)
 
-        instances_to_scale_in = []
-
-        client = boto3.client("cloudwatch", **CREDENTIALS, region_name="us-east-1")
-
-        # Iterate over all instances
-        inst_info: InstanceInfoClass
-        for i, (instance_id, inst_info) in enumerate(whole_inst_info.items()):
-
-            # Get number of elapsed minutes
-            number_of_elapsed_minutes = inst_info.number_of_elapsed_minutes
-
-            # Do calculation when elapsed minutes is greater 3
-            if number_of_elapsed_minutes >= 3:
-
-                try:
-                    response = client.get_metric_statistics(
-                        Namespace="AWS/EC2",
-                        MetricName="CPUUtilization",
-                        Dimensions=[{"Name": "InstanceId", "Value": instance_id}],
-                        StartTime=datetime.datetime.utcnow() - datetime.timedelta(seconds=180),
-                        EndTime=datetime.datetime.utcnow(),
-                        Period=30,
-                        Statistics=["Average"],
-                    )
-                    # logger.debug(f"\t\t response: {response}")
-                except ValueError:
-                    logger.exception(f"\t\t\t\t\texception happened")
-
-                else:
-                    # List of cpu utilization every 1 minute
-                    cpu_list_per_min = [x.get("Average") for x in response["Datapoints"]]
-                    logger.info(f"\t\t\t\t\tcpu_list_per_min of {instance_id} is {cpu_list_per_min}")
-
-                    try:
-                        # Get average of cpu utilization
-                        average_cpu_per_instance = sum(cpu_list_per_min) / len(cpu_list_per_min)
-
-                    except ZeroDivisionError as e:
-                        logger.info(f"\t\t\t\t\tException {e} -> setting cpu util to 0 ")
-                        average_cpu_per_instance = 0
-
-                    # Update this WHOLE_INSTANCE_INFO
-                    inst_info.cpu_util = average_cpu_per_instance
-
-                    # Make InstanceInfoWithCPUClass and add it to list
-                    instance_with_cpu = InstanceInfoWithCPUClass(instance_id, average_cpu_per_instance)
-                    logger.info(f"\t\t\t\t\tAppending {i + 1}th Instance {instance_id} to list")
-                    instances_to_scale_in.append(instance_with_cpu)
-
-            elif number_of_elapsed_minutes < 3:
-                logger.info(f"\t\t\t\t\t{i + 1}th Instance {instance_id}'s elapsed time is less than 3 ")
-
-        # Sort List depending on the cpu util
-        instances_to_scale_in = sorted(instances_to_scale_in, key=lambda x: x.cpu_util)
-        return instances_to_scale_in
-
-    #  Fetch instances with cpu util less than 10 percent of total cpu
-    elif not lowest:
-
-        logger.info(f"\tFind instances to scale in when idle - Case when num of excess servers is 0")
-
-        instances_to_scale_in = []
-
-        client = boto3.client("cloudwatch", **CREDENTIALS, region_name="us-east-1")
-
-        # Iterate over all instances
-        inst_info: InstanceInfoClass
-        for i, (instance_id, inst_info) in enumerate(whole_inst_info.items()):
-
-            # Get number of elapsed minutes
-            number_of_elapsed_minutes = inst_info.number_of_elapsed_minutes
-
-            # Do calculation when elapsed minutes is greater 3
-            if number_of_elapsed_minutes >= 3:
-
-                logger.debug(f"\t\t{i + 1}th {instance_id} -> {inst_info.number_of_elapsed_minutes} mins elapsed")
-                try:
-                    response = client.get_metric_statistics(
-                        Namespace="AWS/EC2",
-                        MetricName="CPUUtilization",
-                        Dimensions=[{"Name": "InstanceId", "Value": instance_id}],
-                        StartTime=datetime.datetime.utcnow() - datetime.timedelta(seconds=180),
-                        EndTime=datetime.datetime.utcnow(),
-                        Period=30,
-                        Statistics=["Average"],
-                    )
-                except ValueError:
-                    logger.exception(f"\t\texception happened")
-
-                else:
-                    # List of cpu utilization every 1 minute
-                    cpu_list_per_min = [x.get("Average") for x in response["Datapoints"]]
-                    logger.info(f"\t\tcpu_list_per_min of {i + 1}th {instance_id} is {cpu_list_per_min}")
-
-                    try:
-                        # Get average of cpu utilization
-                        average_cpu_per_instance = sum(cpu_list_per_min) / len(cpu_list_per_min)
-
-                    # When 0 -> It is idle
-                    except ZeroDivisionError as e:
-                        logger.info(f"\t\tException -> {e} -> Since cpu_util is 0 ")
-                        average_cpu_per_instance = 0
-
-                    # Update this WHOLE_INSTANCE_INFO
-                    inst_info.cpu_util = average_cpu_per_instance
-
-                    # If exists instance less than 10 cpu util -> add to list
-                    if float(average_cpu_per_instance) <= 10:
-                        logger.info(f"\t\t{i + 1}th Instance {instance_id}'s cpu util is less than 10")
-                        instance_with_cpu = InstanceInfoWithCPUClass(instance_id, average_cpu_per_instance)
-                        logger.info(f"\t\tAppending {i + 1}th Instance {instance_id} to list")
-                        instances_to_scale_in.append(instance_with_cpu)
-                    else:
-                        logger.info(f"\t\t{i + 1}th Instance {instance_id}'s cpu util is greater than 10")
-
-            elif number_of_elapsed_minutes < 3:
-                logger.info(f"\t\t{i + 1}th Instance {instance_id}'s elapsed time is less than 3 ")
-
-        return instances_to_scale_in
+    return instances_to_scale_in
 
 
 def fetch_instance_info():
     """
-    Save Instance Id
+    Fetch whole_instance_info, worker_list_in_lbs, instance_list_in_lbs, and ec2 private ip address from pickle
     """
+    pickle_file_dir = os.path.join(conf_dict.experiment_info.get("pickle_dir"), "instance_info.pickle")
+    # logger.debug(f"Pickle file dir: {pickle_file_dir}")
+    with open(pickle_file_dir, "rb") as f:
+        data = pickle.load(f)
 
-    global WHOLE_INSTANCE_INFO
-
-    with open(module_conf.pickle_file, "rb") as file_name:
-        whole_dict_info: dict = pickle.load(file_name)
-    WHOLE_INSTANCE_INFO = whole_dict_info
-
-    instances_list = []
-    worker_list = []
-
-    info: InstanceInfoClass
-    for instance_id, info in WHOLE_INSTANCE_INFO.items():
-        instances_list.append(instance_id)
-        worker_list.append(info.vm_class_info.worker_id)
-
-    # each_worker: VM
-    # for each_worker in INSTANCE_WORKERS:
-    #     # Save instance id
-    #     inst_id = each_worker.instance_id
-    #     instances_list.append(inst_id)
-    #
-    #     # Get worker list
-    #     initial_work_id_list.append(each_worker.worker_id)
-    #
-    #     # Save it to INSTANCE_DICT_INFO
-    #     INSTANCE_DICT_INFO[inst_id]["elapsed_more_than_3_mins"] = 1
-    #     INSTANCE_DICT_INFO[inst_id]["worker_id"] = each_worker.worker_id
-    logger.info("Fetching instances info")
-    logger.info(f"\tinstances_list: {instances_list}")
-    logger.info(f"\tworker_list: {worker_list}")
-
-    return instances_list, worker_list
+    return data['whole_instance_info'], data['instance_list_in_lbs'], data['worker_list_in_lbs'], \
+           data['ec2_private_ip'], data['instance_to_worker']
 
 
-def save_instance_info_to_pickle(instance_info_class: dict):
-    logger.info("Saving Instance Info to Pickle")
-    with open("../Log/Pickle/vm_instance.pkl", "wb") as output:  # FOR TEST
-        pickle.dump(instance_info_class, output, pickle.HIGHEST_PROTOCOL)
-    logger.info("\tFinish Saving Instance Info to Pickle")
-
-
-def get_log_name():
+def save_instance_info_to_pickle(data_to_save: dict):
     """
-
-    :return: return result log name
+    Save whole_instance_info, worker_list_in_lbs, instance_list_in_lbs in pickle
     """
-    logger.info("Set Result Log Name")
+    logger.info("Saving instance info to pickle")
 
-    log_result = input("Name log name:\n")
+    pickle_folder_dir = conf_dict.experiment_info.get("pickle_dir")
+    pickle_file_dir = os.path.join(pickle_folder_dir, "instance_info.pickle")
 
-    result_log_name = None
-    if log_result == "":
-        logger.info("\tNo configuration for log name")
-    else:
-        result_log_name = log_result
+    with open(pickle_file_dir, "wb") as f:
+        pickle.dump(data_to_save, f, pickle.HIGHEST_PROTOCOL)
 
-    return result_log_name
+    logger.info(f"Pickle file saved at {pickle_file_dir}")
 
 
-def invoke_lambda_for_cold_start():
-    logger.info("Invoking lambda for preventing cold start")
-    address_to_request = (
-            "http://"
-            + lb_conf.balancer_ip_addr
-            + WORKLOAD_CHOICE.get("mat_mul")
-            + "lambda"
-    )
-    with requests.Session() as s:
-        try:
-            lambda_res = s.get(address_to_request, timeout=30)
-        except (
-                requests.exceptions.ConnectTimeout,
-                requests.exceptions.ConnectionError,
-        ) as e:
-            logger.info(f"Exception :{e}")
-        else:
-            # result = lambda_res.text
-            # logger.info(f'{result}')
-            assert lambda_res.status_code == 200
-            logger.info("\tInvoked Lambda")
+def print_whole_instance_info():
+    """
+    Print number of instances and details
+    """
+    logger.debug("\tPrint whole instance info")
+
+    for idx, (key, instance_info) in enumerate(whole_instance_info.items()):
+        logger.debug(f"\t\t{idx + 1}th instance - {key} - {instance_info}")
+
+    logger.info("\n")
 
 
 def get_statistics(show_all_durations=False):
-    if not show_all_durations:
-        logger.info("\tCheck metrics for every 1 minute")
+    """
+    Show instance info and SLO
+    """
+    logger.info("Getting statistics")
+
+    print_whole_instance_info()
+
+    for idx, (key, instance_info) in enumerate(terminated_instance_info.items()):
+        logger.debug(f"\t{idx + 1}th instance - {key} - {instance_info}")
 
     if show_all_durations:
-        logger.debug(f"\t\tVIOLATED_DURATIONS : {VIOLATED_DURATIONS}")
-        logger.debug(f"\t\tDURATION_LIST : {DURATION_LIST}")
+        logger.debug(f"\tViolated durations: {duration_info['violated_duration_list']}")
+        logger.debug(f"\tDuration list: {duration_info['duration_list']}")
+        logger.debug(f"\tLambda duration list: {duration_info['lambda_duration_list']}")
+        logger.debug(f"\tNumber of violations: {duration_info['number_of_violation']}")
+        logger.debug(f"\tNumber of durations: {len(duration_info['duration_list'])}")
+        logger.debug(f"\tTotal duration in seconds: {duration_info['duration_in_seconds']}")
 
-    # logger.debug(f"\t\tWHOLE_INSTANCE_INFO : {pformat(WHOLE_INSTANCE_INFO)}")
-    logger.info(f"\tCurrent Instance Info ({len(WHOLE_INSTANCE_INFO)}) instances: {pformat(WHOLE_INSTANCE_INFO)}")
-    # logger.debug(f"\t\tTERMINATED_INSTANCE_INFO : {pformat(TERMINATED_INSTANCE_INFO)}")
-    logger.info(
-        f"\tTerminated Instance Info ({len(TERMINATED_INSTANCE_INFO)}) instances: {pformat(TERMINATED_INSTANCE_INFO)}")
+        try:
+            violations_ratio = (1 - (duration_info['number_of_violation'] / len(duration_info['duration_list']))) * 100
+            logger.debug(f"\tSLO: {violations_ratio}")
+            logger.debug(f"\tMedian of duration list: {np.median(duration_info['duration_list'])}")
 
-    logger.debug(f"\t\tNUMBER_OF_VIOLATION : {NUMBER_OF_VIOLATION}")
-    logger.debug(f"\t\tNumber of DURATION_LIST : {len(DURATION_LIST)}")
-    logger.debug(f"\t\tTotal Duration : {TOTAL_DURATION}")
+            if duration_info['duration_list']:
+                logger.debug(f"\tMaximum duration: {max(duration_info['duration_list'])}")
 
-    try:
-        logger.debug(f"\t\tSLO : {(1 - (NUMBER_OF_VIOLATION / len(DURATION_LIST)))}")
-        logger.debug(f"\t\tAverage Request Per Second: {len(DURATION_LIST) / TOTAL_DURATION}")
-        logger.debug(f"\t\tMedian of DURATION_LIST : {np.median(DURATION_LIST)}")
-        logger.debug(f"\t\tMean of DURATION_LIST : {np.mean(DURATION_LIST)}")
-    except ZeroDivisionError:
-        logger.debug("\t\tZero Exception")
+            avg_rps = len(duration_info['duration_list']) / duration_info['duration_in_seconds']
+            logger.debug(f"\tAverage requests per second: {avg_rps}")
+            logger.debug(f"\tMean of duration list: {np.mean(duration_info['duration_list'])}")
+            logger.debug(f"\tRequests every minute: {duration_info['accumulated_request_list_every_minute']}")
 
+            if duration_info['lambda_duration_list']:
+                logger.debug(f"\tNumber of violations from lambda: {duration_info['number_of_violation_from_lambda']}")
+                logger.debug(f"\tNumber of lambda duration list: {len(duration_info['lambda_duration_list'])}")
+                logger.debug(f"\tMedian of lambda duration list: {np.median(duration_info['lambda_duration_list'])}")
+                logger.debug(
+                    f"\tMaximum duration of lambda duration list: {max(duration_info['lambda_duration_list'])}")
+                logger.debug(f"\tMean of lambda duration list: {np.mean(duration_info['lambda_duration_list'])}")
+        except ZeroDivisionError:
+            logger.debug("\tZero division error\n")
 
-"""
-Start of the code
-"""
-
-WHOLE_INSTANCE_INFO = defaultdict(InstanceInfoClass)
-TERMINATED_INSTANCE_INFO = defaultdict(InstanceInfoClass)
-
-# For keeping initial instances
-INITIAL_OR_LAUNCHED_1_MINUTE_AGO_INSTANCES = []
-
-# Declare and Bring Logger
-logger = return_logger()
-
-# Empty Result Log for filling up a new one
-empty_result_log()
-
-# Get Initial number of requests
-starting_request_number = get_initial_request()
-
-# print(result)
-
-
-# sys.exit(getframeinfo(currentframe()))  # TODO: Stop at this if you want only see if lb is running
 
 if __name__ == "__main__":
-    # Use case and result log name
-    logger.info(f"USE_CASE_FOR_EXPERIMENTS : {USE_CASE_FOR_EXPERIMENT}")
-    logger.info(f"RESULT_LOG_NAME is {RESULT_LOG_NAME}")
 
-    # Experiment Order Phase 1 -> Phase 2,3
+    """Phase 1. Initial Experiment Setup - Get initial experiment setup, make new resources"""
 
-    # TODO: Phase 1
-
-    # === 1. Do some user annotation and putting pragma
-
-    # f_name = module_conf.f_name
-    # bench_dir = module_conf.bench_dir
-    # # """
-    # # === Use compiler later
-    # # whole_info = compiler_simplified.process_before_deploy(f_name, bench_dir)
-    # # """
-    # # === 2. Get initial experiment setup, make new resources
-    # # 2.1 Make previous workers unavailable
-    # make_all_workers_unavailable()
-    # # === 2.2 Terminate previous workers
+    disable_workers_in_loadcat()
     terminate_previous_instances()
-    # # === 2.3 Remove worker information from worker log
-    # remove_contents_in_worker_log()
-    # # === 2.4 Start new initial resources
-    # bring_new_resource(lb_conf.init_number_of_instance, init_phase=True)
-    # # === 3. Save instance info to pickle format so later we can experiment with initial previously launched instances
-    # save_instance_info_to_pickle(WHOLE_INSTANCE_INFO)
-    # # === 4. Stop right here and comment Step 3, 4 and 5 -> move on to 6
-    sys.exit(getframeinfo(currentframe()))  # TODO : Make sure finish here
+    launch_ec2_and_add_to_loadbalancer(conf_dict.server_config.get("init_number_of_instances"), init_phase=True)
+    save_instance_info_to_pickle(data_to_save_in_pickle)
 
-    # TODO: Phase 2
+    # sys.exit(getframeinfo(currentframe())) # Stop here for Phase 2
 
-    # 5. ===== Fetch instance information =====
-    instance_id_list, worker_id_list = fetch_instance_info()
-    logger.info(f"\tINITIAL INSTANCE_WORKERS : {instance_id_list}")
-    logger.info(f"\tWHOLE_INSTANCE_INFO ({len(WHOLE_INSTANCE_INFO)}) instances: {pformat(WHOLE_INSTANCE_INFO)}")
-    # 6.1 ===== Remove unnecessary previous instances ====
-    terminate_previous_instances(instance_id_list)
-    # 6.2 ===== make only initial resources available ====
-    make_all_workers_unavailable(worker_id_list)
-    logger.info(f"\tWHOLE_INSTANCE_INFO ({len(WHOLE_INSTANCE_INFO)}) instances: {pformat(WHOLE_INSTANCE_INFO)}")
+    # For microservices that interact with MongoDB
+    update_ec2_private_ip_env_in_lambda(lambda_arn_list_for_mongodb)
 
-    # sys.exit(getframeinfo(currentframe())) # For Test
+    """Phase 2 - Fetch Initial Instance Info"""
 
-    # TODO: Phase 3 -> Workload and Policy
+    # Fetch instance info from pickle file and assign it to variables
+    whole_instance_info, instance_id_list, worker_id_list, ec2_private_ip, instance_to_worker = fetch_instance_info()
 
-    # 7.1 Workload and Policy concurrently =====
+    logger.debug(f"Whole Instance Info : {whole_instance_info}")
+    for instance_id, inst_info in whole_instance_info.items():
+        logger.debug(instance_id)
+        logger.debug(inst_info.vm_class_info.return_loadcat_data_per_service().get('loadcat_server'))
+    logger.debug(f"Instance ID List : {instance_id_list}")
+    logger.debug(f"Worker ID List : {worker_id_list}")
+    logger.debug(f"EC2 Private IP : {ec2_private_ip}")
+    logger.debug(f"Instance to Worker : {instance_to_worker}")
+
+    # sys.exit(getframeinfo(currentframe()))
+
+    """Phase 3 -> Workload and Policy"""
+
     workload_task = threading.Thread(target=start_workload)
 
-    # 7.2 Policy =====
     policy_task = threading.Thread(target=start_policy)
 
-    # 7.3 Start workload =====
-    workload_task.start()
+    workload_task.start()  # Start workload
 
-    # 7.4 Start policy =====
-    policy_task.start()
+    policy_task.start()  # Start policy
 
-    # 7.5 Wait for workload to finish =====
-    workload_task.join()
-    logger.info("Ended Workload\n")
+    workload_task.join()  # Wait for workload to finish
 
-    # 7.6 Stop policy after finishing workload =====
-    INDEX_FOR_STOPPING_SCALING_POLICY = True
-    policy_task.join()
-    logger.info("Ended Policy")
+    index_for_stopping_scaling_policy = True
+    policy_task.join()  # Wait for policy to finish
 
-    # logger.info(f"INSTANCE_DICT_INFO {INSTANCE_DICT_INFO}")
-    get_statistics(show_all_durations=True)
+    # get_statistics(show_all_durations=True)
+    copy_result_log()
 
-    # 8 Copy result and server log =====
-    copy_result_log(), copy_server_log(),  # sys.exit(getframeinfo(currentframe()))
+    sys.exit(logger.debug(getframeinfo(currentframe())))
