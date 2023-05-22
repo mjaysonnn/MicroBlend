@@ -5,22 +5,22 @@ import datetime
 import os
 import random
 import sys
+from fastapi import FastAPI
 from pathlib import Path
 from typing import Union, List
 
-from fastapi import FastAPI
-from opentelemetry import trace
+# from opentelemetry import trace
 
 # Fetch Thrift Format for ComposePostService
 sys.path.append(os.path.join(sys.path[0], 'gen-py'))
 
 # Import OpenTelemetry and Logger modules
-from utils import utils, utils_opentelemetry, utils_social_network
+from utils import utils, utils_social_network
 
 # Mongo
 from pymongo import MongoClient
 
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+# from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 test_input = utils_social_network.generate_post_class_input()
 
@@ -28,7 +28,7 @@ test_input = utils_social_network.generate_post_class_input()
 app = FastAPI()
 
 # OpenTelemetry Tracer
-tracer = utils_opentelemetry.set_tracer()
+# tracer = utils_opentelemetry.set_tracer()
 
 # Logging to file
 logger = utils.init_logger(Path(__file__).parent.absolute())
@@ -61,33 +61,33 @@ def GetFollowers(req_id: int, user_id: int, carrier: dict) -> List[int]:
     global logger
     global mongo_client, social_graph_collection
 
-    parent_ctx = TraceContextTextMapPropagator().extract(carrier) if carrier else {}
+    # parent_ctx = TraceContextTextMapPropagator().extract(carrier) if carrier else {}
 
-    with tracer.start_as_current_span("GetFollowers", parent_ctx, kind=trace.SpanKind.SERVER):
-        # logger.info(f"SocialGraphService Start {req_id} {utils.get_timestamp_ms()}")
+    # with tracer.start_as_current_span("GetFollowers", parent_ctx, kind=trace.SpanKind.SERVER):
+    # logger.info(f"SocialGraphService Start {req_id} {utils.get_timestamp_ms()}")
 
-        start_time = datetime.datetime.now()
+    start_time = datetime.datetime.now()
 
-        # Find follower and append user_id to result
-        followers_user_id = []
-        cursor = social_graph_collection.find(filter={'followees': user_id})
-        for doc in cursor:
-            follower_id = doc['user_id']
-            followers_user_id.append(follower_id)
+    # Find follower and append user_id to result
+    followers_user_id = []
+    cursor = social_graph_collection.find(filter={'followees': user_id})
+    for doc in cursor:
+        follower_id = doc['user_id']
+        followers_user_id.append(follower_id)
 
-        # Insanity Check
-        # cursor = social_graph_collection.find({})
-        # for document in cursor:
-        #     logger.debug(document)
+    # Insanity Check
+    # cursor = social_graph_collection.find({})
+    # for document in cursor:
+    #     logger.debug(document)
 
-        # # logger.info(f"{req_id} end post_storage_service {get_timestamp_ms()}")
-        # # logger.info(f"SocialGraphService End {req_id} {utils.get_timestamp_ms()}")
+    # # logger.info(f"{req_id} end post_storage_service {get_timestamp_ms()}")
+    # # logger.info(f"SocialGraphService End {req_id} {utils.get_timestamp_ms()}")
 
-        end_time = datetime.datetime.now()
-        logger.info(f"SocialGraphService {req_id} {start_time.timestamp()} {end_time.timestamp()}"
-                    f" {(end_time - start_time).total_seconds()}")
+    end_time = datetime.datetime.now()
+    # logger.info(f"SocialGraphService {req_id} {start_time.timestamp()} {end_time.timestamp()}"
+    #             f" {(end_time - start_time).total_seconds()}")
 
-        return followers_user_id
+    return followers_user_id
 
 
 @app.get("/social_graph_service/{input_p}")

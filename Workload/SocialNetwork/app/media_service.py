@@ -1,25 +1,25 @@
 import datetime
 import os
 import sys
+from fastapi import FastAPI
 from pathlib import Path
 from typing import Union, List
 
-from fastapi import FastAPI
-from opentelemetry import trace
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+# from opentelemetry import trace
+# from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 # Fetch Thrift Format for ComposePostService
 sys.path.append(os.path.join(sys.path[0], 'gen-py'))
 from social_network.ttypes import *
 
 # Import OpenTelemetry and Logger modules
-from utils import utils, utils_opentelemetry
+from utils import utils
 
 # Init FastAPI Application
 app = FastAPI()
 
 # OpenTelemetry Tracer
-tracer = utils_opentelemetry.set_tracer()
+# tracer = utils_opentelemetry.set_tracer()
 
 # Logging to file
 logger = utils.init_logger(Path(__file__).parent.absolute())
@@ -39,28 +39,30 @@ def ComposeMedia(req_id: int, media_types: List[str], media_ids: List[int], carr
     """
     global logger
 
-    parent_ctx = TraceContextTextMapPropagator().extract(carrier) if carrier else {}
+    # parent_ctx = TraceContextTextMapPropagator().extract(carrier) if carrier else {}
 
-    with tracer.start_as_current_span("ComposeMedia", parent_ctx, kind=trace.SpanKind.SERVER):
+    # with tracer.start_as_current_span("ComposeMedia", parent_ctx, kind=trace.SpanKind.SERVER):
 
-        start_time = datetime.datetime.now()
+    start_time = datetime.datetime.now()
 
-        try:
-            len(media_types) == len(media_ids)
-        except ServiceException:
-            logger.error("The lengths of media_id list and media_type list are not equal")
+    try:
+        len(media_types) == len(media_ids)
+    except ServiceException:
+        logger.error("The lengths of media_id list and media_type list are not equal")
 
-        # Append Media id and Media Types
-        media_list = []
-        for i in range(len(media_ids)):
-            new_media = Media(media_id=media_ids[i], media_type=media_types[i])
-            media_list.append(new_media)
+    # Append Media id and Media Types
+    media_list = []
+    for i in range(len(media_ids)):
+        new_media = Media(media_id=media_ids[i], media_type=media_types[i])
+        media_list.append(new_media)
 
-        end_time = datetime.datetime.now()
-        logger.info(f"MediaService {req_id} {start_time.timestamp()} {end_time.timestamp()}"
-                    f" {(end_time - start_time).total_seconds()}")
+    # logger.info(f"MediaService End {req_id} {utils.get_timestamp_ms()}")
 
-        return media_list
+    end_time = datetime.datetime.now()
+    # logger.info(f"MediaService {req_id} {start_time.timestamp()} {end_time.timestamp()}"
+    # f" {(end_time - start_time).total_seconds()}")
+
+    return media_list
 
 
 @app.get("/media_service/{input_p}")
@@ -96,3 +98,10 @@ def run_media_service(input_p: Union[str, None] = None):
 
     # 3. Return media_list
     return media_res
+
+#
+# @app.on_event("startup")
+# async def startup_event():
+#     """
+#     Init logger and config.ini
+#     """

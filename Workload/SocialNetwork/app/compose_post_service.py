@@ -1,24 +1,24 @@
 import datetime
 import os
+import requests
 import sys
 from concurrent.futures import ThreadPoolExecutor, wait
+from fastapi import FastAPI
 from pathlib import Path
 from typing import Union, List
 
-import requests
-from fastapi import FastAPI
-from opentelemetry import trace
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+# from opentelemetry import trace
+# from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 # Fetch Thrift Format for ComposePostService
 sys.path.append(os.path.join(sys.path[0], 'gen-py'))
 from social_network.ttypes import *
 
-from utils import utils, utils_opentelemetry, utils_social_network  # Import OpenTelemetry and Logger modules
+from utils import utils, utils_social_network  # Import OpenTelemetry and Logger modules
 
 app = FastAPI()  # Init FastAPI Application
 
-tracer = utils_opentelemetry.set_tracer()  # OpenTelemetry Tracer
+# tracer = utils_opentelemetry.set_tracer()  # OpenTelemetry Tracer
 
 logger = utils.init_logger(Path(__file__).parent.absolute())  # Logging to file
 
@@ -152,58 +152,61 @@ def ComposePost(req_id: int, username: str, user_id: int, text: str, media_ids: 
     8. Invoke HomeTimelineService
     """
     # Extract URLs from text
-    parent_ctx = TraceContextTextMapPropagator().extract(carrier) if carrier else {}
+    # parent_ctx = TraceContextTextMapPropagator().extract(carrier) if carrier else {}
 
-    with tracer.start_as_current_span("ComposePost", parent_ctx, kind=trace.SpanKind.SERVER):
-        # start_time = utils.get_timestamp_ms()
-        start_time = datetime.datetime.now()
+    # with tracer.start_as_current_span("ComposePost", parent_ctx, kind=trace.SpanKind.SERVER):
+    # start_time = utils.get_timestamp_ms()
+    start_time = datetime.datetime.now()
 
-        TraceContextTextMapPropagator().inject(carrier)
+    # TraceContextTextMapPropagator().inject(carrier)
 
-        with ThreadPoolExecutor() as executor:  # Invoke Microservices to get variables for Post
-            text_future = executor.submit(invoke_text_service, req_id, text, carrier)
-            creator_future = executor.submit(invoke_user_service, req_id, user_id, username, carrier)
-            media_future = executor.submit(invoke_media_service, req_id, media_types, media_ids, carrier)
-            unique_id_future = executor.submit(invoke_unique_id_service, req_id, post_type, carrier)
+    with ThreadPoolExecutor() as executor:  # Invoke Microservices to get variables for Post
+        text_future = executor.submit(invoke_text_service, req_id, text, carrier)
+        creator_future = executor.submit(invoke_user_service, req_id, user_id, username, carrier)
+        media_future = executor.submit(invoke_media_service, req_id, media_types, media_ids, carrier)
+        unique_id_future = executor.submit(invoke_unique_id_service, req_id, post_type, carrier)
 
-            post_id: int = unique_id_future.result()  # Result from UniqueIdService
-            # logger.debug(f"post_id is {post_id}")
+        post_id: int = unique_id_future.result()  # Result from UniqueIdService
+        # logger.debug(f"post_id is {post_id}")
 
-            creator = creator_future.result()  # Result from UserService
-            creator = Creator(**creator)
+        creator = creator_future.result()  # Result from UserService
+        creator = Creator(**creator)
 
-            media = media_future.result()  # Result from MediaService
-            media = [Media(**i) for i in media]  # Result from MediaService
-            # media = Media(**media)
+        media = media_future.result()  # Result from MediaService
+        media = [Media(**i) for i in media]  # Result from MediaService
+        # media = Media(**media)
 
-            text_res = text_future.result()  # Result from TextService
-            text_res = TextServiceReturn(**text_res)
+        text_res = text_future.result()  # Result from TextService
+        text_res = TextServiceReturn(**text_res)
 
-            urls: List[Url] = text_res.urls  # Process Post
-            # urls: List[Url] = text_res.get("urls")
-            user_mentions_id = list()
-            user_mentions: List[UserMention] = text_res.user_mentions
-            for each_user_mention in user_mentions:
-                # user_mentions_id.append(each_user_mention.user_id)
-                user_mentions_id.append(each_user_mention.get("user_id"))
-                # logger.debug(user_mentions_id)
+        urls: List[Url] = text_res.urls  # Process Post
+        # urls: List[Url] = text_res.get("urls")
+        user_mentions_id = list()
+        user_mentions: List[UserMention] = text_res.user_mentions
+        for each_user_mention in user_mentions:
+            # user_mentions_id.append(each_user_mention.user_id)
+            user_mentions_id.append(each_user_mention.get("user_id"))
+            # logger.debug(user_mentions_id)
 
-        # Making Post Class
-        timestamp = utils.get_timestamp_ms()
-        post = Post(post_id, creator, req_id, text, user_mentions, media, urls, timestamp, post_type)
-        # logger.debug(post)
+    # Making Post Class
+    timestamp = utils.get_timestamp_ms()
+    post = Post(post_id, creator, req_id, text, user_mentions, media, urls, timestamp, post_type)
+    # logger.debug(post)
 
-        # Invoke 3 microservices
-        with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(invoke_post_storage_service, req_id, post, carrier),
-                       executor.submit(invoke_user_timeline_service, req_id, post_id, user_id, timestamp, carrier),
-                       executor.submit(invoke_home_timeline_service, req_id, post_id, user_id, timestamp,
-                                       user_mentions_id, carrier)]
-            wait(futures)
+    # Invoke 3 microservices
+    with ThreadPoolExecutor() as executor:
+        futures = [executor.submit(invoke_post_storage_service, req_id, post, carrier),
+                   executor.submit(invoke_user_timeline_service, req_id, post_id, user_id, timestamp, carrier),
+                   executor.submit(invoke_home_timeline_service, req_id, post_id, user_id, timestamp,
+                                   user_mentions_id, carrier)]
+        wait(futures)
 
-        end_time = datetime.datetime.now()
-        logger.info(f"ComposePostService {req_id} {start_time.timestamp()} {end_time.timestamp()}"
-                    f" {(end_time - start_time).total_seconds()}")
+    end_time = datetime.datetime.now()
+    # in miliseconds
+    # total seconds in miliseconds
+
+    logger.info(f"ComposePostService {req_id} {start_time.timestamp()} {end_time.timestamp()}"
+                f" {(end_time - start_time).total_seconds() * 1000}")
 
 
 @app.get("/compose_post_service/{input_p}")

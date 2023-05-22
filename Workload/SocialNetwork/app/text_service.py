@@ -13,23 +13,24 @@ import sys
 import urllib
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI
-from opentelemetry import trace
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from pathlib import Path
 from typing import Union
+
+# from opentelemetry import trace
+# from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 # Fetch Thrift Format for ComposePostService
 sys.path.append(os.path.join(sys.path[0], 'gen-py'))
 from social_network.ttypes import *
 
 # Import OpenTelemetry and Logger modules
-from utils import utils, utils_opentelemetry
+from utils import utils
 
 # Init FastAPI Application
 app = FastAPI()
 
 # OpenTelemetry Tracer
-tracer = utils_opentelemetry.set_tracer()
+# tracer = utils_opentelemetry.set_tracer()
 
 # Logging to file
 logger = utils.init_logger(Path(__file__).parent.absolute())
@@ -58,6 +59,8 @@ def invoke_url_shorten_service(req_id, urls, carrier):
     resp.raise_for_status()  # Raise exception if status code is not 200
     res = resp.json()
 
+    # # logger.info(f"TextService Invoke UrlShortenService End {req_id} {get_timestamp_ms()}")
+    # # logger.info(f"req_id : {req_id} - end invoke url_shorten_service {get_timestamp_ms()}")
     return res
 
 
@@ -88,46 +91,46 @@ def ComposeText(req_id: int, text: str, carrier: dict) -> TextServiceReturn:
     global logger
 
     # Start OpenTelemetry Tracer - If there is parent context, use it
-    parent_ctx = TraceContextTextMapPropagator().extract(carrier) if carrier else {}
+    # parent_ctx = TraceContextTextMapPropagator().extract(carrier) if carrier else {}
 
-    with tracer.start_as_current_span("ComposeText", parent_ctx, kind=trace.SpanKind.SERVER):
+    # with tracer.start_as_current_span("ComposeText", parent_ctx, kind=trace.SpanKind.SERVER):
+    # logger.info(f"TextService Start {req_id} {utils.get_timestamp_ms()}")
+    start_time = datetime.datetime.now()
 
-        start_time = datetime.datetime.now()
+    text = urllib.parse.unquote(text)  # Note: if @ does not change to %40u -> use urllib.parse.unquote(text)
 
-        text = urllib.parse.unquote(text)  # Note: if @ does not change to %40u -> use urllib.parse.unquote(text)
+    # Search and add usernames
+    usernames = list()
+    str_reg = '@[a-zA-Z0-9-_]+'
+    match = re.findall(str_reg, text)
+    for i in range(len(match)):
+        usernames.append(match[i].lstrip("@"))
+    # logger.debug(usernames)
 
-        # Search and add usernames
-        usernames = list()
-        str_reg = '@[a-zA-Z0-9-_]+'
-        match = re.findall(str_reg, text)
-        for i in range(len(match)):
-            usernames.append(match[i].lstrip("@"))
-        # logger.debug(usernames)
+    # Search and URL
+    urls = list()
+    url_reg = "(http://|https://)([a-zA-Z0-9-_]+)"
+    match2 = re.findall(url_reg, text)
+    for i in range(len(match2)):
+        urls.append(match2[i][0] + match2[i][1])
 
-        # Search and URL
-        urls = list()
-        url_reg = "(http://|https://)([a-zA-Z0-9-_]+)"
-        match2 = re.findall(url_reg, text)
-        for i in range(len(match2)):
-            urls.append(match2[i][0] + match2[i][1])
+    # inject writer for parent span.
+    # TraceContextTextMapPropagator().inject(carrier)
 
-        # inject writer for parent span.
-        TraceContextTextMapPropagator().inject(carrier)
+    # Invoke UrlShortenService and UserMentionService
+    with ThreadPoolExecutor() as executor:
+        url_shorten_future = executor.submit(invoke_url_shorten_service, req_id, urls, carrier)
+        user_mention_future = executor.submit(invoke_user_mention_service, req_id, usernames, carrier)
 
-        # Invoke UrlShortenService and UserMentionService
-        with ThreadPoolExecutor() as executor:
-            url_shorten_future = executor.submit(invoke_url_shorten_service, req_id, urls, carrier)
-            user_mention_future = executor.submit(invoke_user_mention_service, req_id, usernames, carrier)
+        # Make a post
+        urls_res = url_shorten_future.result()
+        user_mentions_res = user_mention_future.result()
 
-            # Make a post
-            urls_res = url_shorten_future.result()
-            user_mentions_res = user_mention_future.result()
+    end_time = datetime.datetime.now()
+    # logger.info(f"TextService {req_id} {start_time.timestamp()} {end_time.timestamp()}"
+    #             f" {(end_time - start_time).total_seconds()}")
 
-        end_time = datetime.datetime.now()
-        logger.info(f"TextService {req_id} {start_time.timestamp()} {end_time.timestamp()}"
-                    f" {(end_time - start_time).total_seconds()}")
-
-        return TextServiceReturn(text, user_mentions_res, urls_res)
+    return TextServiceReturn(text, user_mentions_res, urls_res)
 
 
 @app.get("/text_service/{input_p}")
@@ -140,12 +143,18 @@ def run_text_service(input_p: Union[str, None] = None):
 
     # 1. Decode the input
     parsed_inputs = utils.native_object_decoded(input_p) if input_p != "Test" else {}
+    # logger.debug("parsed_inputs: {}".format(parsed_inputs))
 
     # Parameters
     req_id = parsed_inputs.get('req_id', 3)
     text = parsed_inputs.get('text', 'testtesttesttest')
     carrier = parsed_inputs.get('carrier', {})
 
+    # logger.info(f"Call TextService Start {req_id}  {utils.get_timestamp_ms()}")
     res = ComposeText(req_id, text, carrier)
+    # # logger.info(f"Call TextService End {req_id} {get_timestamp_ms()}")
+    # logger.debug(res)
+    # logger.debug(type(res))
+    # text_res = native_object_encoded(res)
 
     return res

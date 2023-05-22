@@ -1,25 +1,25 @@
 import datetime
 import os
+import requests
 import sys
+from fastapi import FastAPI
 from pathlib import Path
 from typing import Union, List
 
-import requests
-from fastapi import FastAPI
-from opentelemetry import trace
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+# from opentelemetry import trace
+# from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 # Fetch Thrift Format for ComposePostService
 sys.path.append(os.path.join(sys.path[0], 'gen-py'))
 
 # Import OpenTelemetry and Logger modules
-from utils import utils, utils_opentelemetry, utils_social_network
+from utils import utils, utils_social_network
 
 # Init FastAPI Application
 app = FastAPI()
 
 # OpenTelemetry Tracer
-tracer = utils_opentelemetry.set_tracer()
+# tracer = utils_opentelemetry.set_tracer()
 
 # Logging to file
 logger = utils.init_logger(Path(__file__).parent.absolute())
@@ -90,43 +90,43 @@ def WriteHomeTimeline(req_id: int, post_id: int, user_id: int, timestamp: int, u
     global mongo_client, home_timeline_collection
 
     # Start OpenTelemetry Tracer - If there is parent context, use it
-    parent_ctx = TraceContextTextMapPropagator().extract(carrier) if carrier else {}
+    # parent_ctx = TraceContextTextMapPropagator().extract(carrier) if carrier else {}
 
-    with tracer.start_as_current_span("WriteHomeTimeline", parent_ctx, kind=trace.SpanKind.SERVER):
-        start_time = datetime.datetime.now()
+    # with tracer.start_as_current_span("WriteHomeTimeline", parent_ctx, kind=trace.SpanKind.SERVER):
+    start_time = datetime.datetime.now()
 
-        home_timeline_ids = []
+    home_timeline_ids = []
 
-        # Inject OpenTelemetry Context to carrier
-        TraceContextTextMapPropagator().inject(carrier)
+    # Inject OpenTelemetry Context to carrier
+    # TraceContextTextMapPropagator().inject(carrier)
 
-        # Invoke GetFollowers from SocialGraphService
-        social_graph_result: List[int] = invoke_social_graph_service(req_id, user_id, carrier)
+    # Invoke GetFollowers from SocialGraphService
+    social_graph_result: List[int] = invoke_social_graph_service(req_id, user_id, carrier)
 
-        # Append results to home_timeline_ids
-        home_timeline_ids.extend(social_graph_result)
+    # Append results to home_timeline_ids
+    home_timeline_ids.extend(social_graph_result)
 
-        # Include user mentions in result
-        for user_mention in user_mentions_id:
-            home_timeline_ids.append(user_mention)
+    # Include user mentions in result
+    for user_mention in user_mentions_id:
+        home_timeline_ids.append(user_mention)
 
-        # # Update Post id and Timestamp of User id
-        for home_timeline_id in home_timeline_ids:
-            post_to_insert = {'post_id': post_id, 'timestamp': timestamp, 'home_timeline_id': home_timeline_id}
+    # # Update Post id and Timestamp of User id
+    for home_timeline_id in home_timeline_ids:
+        post_to_insert = {'post_id': post_id, 'timestamp': timestamp, 'home_timeline_id': home_timeline_id}
 
-            home_timeline_collection.update_one({'post_id': post_to_insert.get('post_id')}, {'$set': post_to_insert},
-                                                upsert=True)
+        home_timeline_collection.update_one({'post_id': post_to_insert.get('post_id')}, {'$set': post_to_insert},
+                                            upsert=True)
 
-        # ## Insanity Check
-        # cursor = home_timeline_collection.find({})
-        # for document in cursor:
-        #     logger.debug(document)
+    # ## Insanity Check
+    # cursor = home_timeline_collection.find({})
+    # for document in cursor:
+    #     logger.debug(document)
 
-        # # logger.info(f"{req_id} end home_timeline_service {get_timestamp_ms()}")
-        # # logger.info(f"HomeTimelineService End {req_id} {utils.get_timestamp_ms()}")
-        end_time = datetime.datetime.now()
-        logger.info(f"HomeTimelineService {req_id} {start_time.timestamp()} {end_time.timestamp()}"
-                    f" {(end_time - start_time).total_seconds()}")
+    # # logger.info(f"{req_id} end home_timeline_service {get_timestamp_ms()}")
+    # # logger.info(f"HomeTimelineService End {req_id} {utils.get_timestamp_ms()}")
+    end_time = datetime.datetime.now()
+    # logger.info(f"HomeTimelineService {req_id} {start_time.timestamp()} {end_time.timestamp()}"
+    #             f" {(end_time - start_time).total_seconds()}")
 
 
 @app.get("/home_timeline_service/{input_p}")
