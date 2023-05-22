@@ -1,10 +1,9 @@
 import dataclasses
 import random
 import string
+from fastapi import FastAPI
 from pathlib import Path
 from typing import Union
-
-from fastapi import FastAPI
 
 from utils import utils
 

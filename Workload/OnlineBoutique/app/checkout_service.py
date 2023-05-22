@@ -1,12 +1,11 @@
 import dataclasses
 import random
+import requests
 import string
 import time
+from fastapi import FastAPI
 from pathlib import Path
 from typing import Union
-
-import requests
-from fastapi import FastAPI
 
 # Import OpenTelemetry and Logger modules
 from utils import utils, utils_opentelemetry

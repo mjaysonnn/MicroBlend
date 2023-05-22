@@ -2,11 +2,10 @@ import dataclasses
 import datetime
 import random
 import string
-from pathlib import Path
-from typing import Union
-
 from fastapi import FastAPI
+from pathlib import Path
 from pymongo import MongoClient
+from typing import Union
 
 # Import OpenTelemetry and Logger modules
 from utils import utils

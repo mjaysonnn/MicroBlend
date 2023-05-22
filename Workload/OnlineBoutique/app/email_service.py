@@ -1,8 +1,7 @@
 import dataclasses
+from fastapi import FastAPI
 from pathlib import Path
 from typing import Union
-
-from fastapi import FastAPI
 
 # Import OpenTelemetry and Logger modules
 from utils import utils
