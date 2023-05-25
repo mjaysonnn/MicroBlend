@@ -4,5 +4,5 @@ MicroBlend is an automated framework for combining IaaS and FaaS services in a c
 ## Description
 * Compiler - Creation of FaaS-ready code
 * Controller - Responsible for autoscaling and service assignment
-* RequestGenerator - Real-world request generator
-* Workload - Benchmark used in the evaluation
+* Traces - Real-world Traces (WITS, WIKI) used for evaluation
+* Workload - Benchmark used in the evaluation (python)
