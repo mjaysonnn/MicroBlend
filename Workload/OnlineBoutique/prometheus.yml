@@ -1,5 +1,5 @@
 scrape_configs:
-  - job_name: 'runq_exporter'
+  - job_name: "runq_exporter"
     scrape_interval: 15s
     static_configs:
-      - targets: [ 'runq-exporter:8000' ]
+      - targets: [ "runq-exporter:8000" ]
