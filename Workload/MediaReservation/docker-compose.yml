@@ -124,7 +124,6 @@ services:
       - -c
       - uvicorn movie_id_service:app --log-level critical  --host 0.0.0.0 --port 5005
 
-
   movie-id-mongodb:
     image: mongo
     container_name: movie-id-mongodb
