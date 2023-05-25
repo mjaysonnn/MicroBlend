@@ -44,7 +44,7 @@ def init_logger(filename=None):
         os.makedirs(log_dir)
 
     # Write log to file
-    result_log_with_dir = log_dir / (Path(__file__).stem + '.log')
+    result_log_with_dir = log_dir / f'{Path(__file__).stem}.log'
 
     # Empty log file
     open(result_log_with_dir, "w").close()

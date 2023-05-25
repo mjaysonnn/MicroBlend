@@ -9,7 +9,7 @@ from typing import Dict
 
 import boto3
 
-sys.path.append('utils')
+sys.path.append("utils")
 
 from aws_key import CREDENTIALS
 
@@ -17,19 +17,19 @@ from aws_key import CREDENTIALS
 # Fetch Configuration
 def load_config():
     config = configparser.ConfigParser()
-    config_path = Path(__file__).parent.parent.absolute() / 'utils' / 'config.ini'
+    config_path = Path(__file__).parent.parent.absolute() / "utils" / "config.ini"
     config.read(config_path)
     conf_dict = {sect: dict(config.items(sect)) for sect in config.sections()}
-    conf_dict.pop('root', None)
+    conf_dict.pop("root", None)
     return conf_dict
 
 
 class ModuleConfiguration:
     def __init__(self):
         conf_dict = load_config()
-        self._server_config = conf_dict.get('Server')
-        self._workload_input_config = conf_dict.get('Workload-Input')
-        self._external_lb_config = conf_dict.get('External-LoadBalancer')
+        self._server_config = conf_dict.get("Server")
+        self._workload_input_config = conf_dict.get("Workload-Input")
+        self._external_lb_config = conf_dict.get("External-LoadBalancer")
 
         self.nginx_basic_status_url: str = "basic_status"
 
@@ -168,13 +168,6 @@ class InstanceInfoWithCPUClass:
 
 
 @dataclass
-class PreviouslyLaunchedInstancesClass:
-    instance_id: str
-    running_time: datetime.datetime
-    gap_in_seconds: float
-
-
-@dataclass
 class InstanceInfoClass:
     vm_class_info: VM = None
     running_time: datetime.datetime = datetime.datetime.now()
@@ -188,44 +181,10 @@ class TerminatedInstanceInfoClass(InstanceInfoClass):
     termination_time: datetime.datetime = datetime.datetime.now()
 
 
-def terminate_previous_instances(inst_id_list=None):
-    """
-    Terminate instance with tag : Python-SocialNetwork before experiment
-    """
-    global logger, server_tag_name, ec2_client
-
-    logger.info("Start terminating previous instances")
-
-    # Initial Instance List
-    if inst_id_list is None:
-        inst_id_list = list()
-
-    try:
-        custom_filter = [{"Name": "tag:Name", "Values": [server_tag_name]},
-                         {"Name": "instance-state-name", "Values": ["running"]}]
-        response = ec2_client.describe_instances(Filters=custom_filter)
-        for res in response["Reservations"]:
-            for i in res["Instances"]:
-                each_inst_id = i["InstanceId"]
-                if each_inst_id in inst_id_list:
-                    logger.info(f"\tSkip Initial Instance - {each_inst_id}")
-                    continue
-                else:
-                    ec2_client.terminate_instance(each_inst_id)
-        if not response["Reservations"]:
-            raise ValueError
-    except ValueError:
-        logger.info(f'\tNo instances of {server_tag_name} running')
-    finally:
-        logger.info("Finished terminating instances beforehand\n")
-
-
 def return_microservices_that_involve_mongodb():
     """
-    Make a list of microservices that integrate with MongoDB, for Lambda update
+    Make a list of microservices that integrate with MongoDB, for Lambda update (Use for your own experiment
     """
     global module_conf
 
-    arn_list = list()
-
-    return arn_list
+    return []

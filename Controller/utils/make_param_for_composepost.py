@@ -1,11 +1,13 @@
+"""
+This file is used to generate parameters for ComposePostService.
+"""
 import random
 import sys
 from dataclasses import dataclass, field
 from typing import List
 
-# Add gen-py dir
-sys.path.append('gen-py')
-sys.path.append('utils')
+sys.path.append("gen-py")
+sys.path.append("utils")
 
 from social_network.ttypes import *
 from utility import get_random_string
@@ -66,11 +68,16 @@ class ComposePostServiceParameters:
         user_mention_1 = UserMention(user_id=2, username="username_2")
         user_mentions = [user_mention_0, user_mention_1]
 
-        post = Post(user_mentions=user_mentions, req_id=req_id, creator=creator,
-                    post_type=post_type, urls=urls, media=media, post_id=post_id,
-                    text=text)
-
-        return post
+        return Post(
+            user_mentions=user_mentions,
+            req_id=req_id,
+            creator=creator,
+            post_type=post_type,
+            urls=urls,
+            media=media,
+            post_id=post_id,
+            text=text,
+        )
 
 
 def generate_input_for_compose_post_service(req_id=None):
