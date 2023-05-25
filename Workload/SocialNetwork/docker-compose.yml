@@ -1,6 +1,5 @@
 version: "3.9"
 services:
-
   nginx:
     image: nginx:latest
     volumes:
@@ -38,7 +37,6 @@ services:
     volumes:
       - "./prometheus.yml:/etc/prometheus/prometheus.yml:ro"
 
-
   unique-id-service:
     image: smj8612/social_network_mj:latest
     container_name: unique-id-service
@@ -50,7 +48,6 @@ services:
       - /bin/sh
       - -c
       - uvicorn unique_id_service:app --log-level critical --host 0.0.0.0 --port 5001
-
 
   media-service:
     image: smj8612/social_network_mj:latest
@@ -100,7 +97,6 @@ services:
       - -c
       - uvicorn user_mention_service:app --log-level critical  --host 0.0.0.0 --port 5005
 
-
   text-service:
     image: smj8612/social_network_mj:latest
     container_name: text-service
@@ -124,7 +120,6 @@ services:
       - /bin/sh
       - -c
       - uvicorn compose_post_service:app --log-level critical  --host 0.0.0.0 --port 5007
-
 
   post-storage-service:
     image: smj8612/social_network_mj:latest
@@ -168,7 +163,6 @@ services:
       - -c
       - uvicorn home_timeline_service:app --log-level critical --host 0.0.0.0 --port 5010
 
-
   social-graph-service:
     image: smj8612/social_network_mj:latest
     container_name: social-graph-service
@@ -189,37 +183,36 @@ services:
     image: mongo
     container_name: url-shorten-mongodb
     ports:
-      - '27017:27017'
+      - "27017:27017"
     command: mongod --quiet --logpath /dev/null
 
   social-graph-mongodb:
     image: mongo
     container_name: social-graph-mongodb
     ports:
-      - '27018:27017'
+      - "27018:27017"
     command: mongod --quiet --logpath /dev/null
 
   post-storage-mongodb:
     image: mongo
     container_name: post-storage-mongodb
     ports:
-      - '27019:27017'
+      - "27019:27017"
     command: mongod --quiet --logpath /dev/null
 
   user-timeline-mongodb:
     image: mongo
     container_name: user-timeline-mongodb
     ports:
-      - '27020:27017'
+      - "27020:27017"
     command: mongod --quiet --logpath /dev/null
 
   home-timeline-mongodb:
     image: mongo
     container_name: home-timeline-mongodb
     ports:
-      - '27021:27017'
+      - "27021:27017"
     command: mongod --quiet --logpath /dev/null
-
 
   init-social-graph:
     image: smj8612/social_network_mj:latest
@@ -238,7 +231,6 @@ services:
     entrypoint:
       - python3
       - utils/init_social_graph.py
-
 
   runq-exporter:
     image: smj8612/runq-exporter:latest

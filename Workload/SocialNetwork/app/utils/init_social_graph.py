@@ -4,7 +4,7 @@ Insert 1000 posts to mongodb
 import random
 import sys
 
-sys.path.append('utils')
+sys.path.append("utils")
 
 # Mongo
 import pymongo
@@ -39,13 +39,13 @@ def init_mongodbs(drop_all_dbs=True, except_social_graph=False):
     home_timeline_client = MongoClient("home-timeline-mongodb", 27017)
 
     if drop_all_dbs:
-        url_shorten_client.drop_database('url_shorten')
+        url_shorten_client.drop_database("url_shorten")
         if not except_social_graph:
-            social_graph_client.drop_database('social_graph')
-        social_graph_client.drop_database('user')
-        post_storage_client.drop_database('post')
-        user_timeline_client.drop_database('user_timeline')
-        home_timeline_client.drop_database('home_timeline')
+            social_graph_client.drop_database("social_graph")
+        social_graph_client.drop_database("user")
+        post_storage_client.drop_database("post")
+        user_timeline_client.drop_database("user_timeline")
+        home_timeline_client.drop_database("home_timeline")
 
 
 def init_social_graph():
@@ -53,62 +53,64 @@ def init_social_graph():
     global conf_dict
     global social_graph_client
 
-    # port = int(conf_dict.get('DB').get('social-graph-mongodb-port'))
     port = 27017
     if social_graph_client is None:
-        social_graph_client = MongoClient("social-graph-mongodb", port, waitQueueTimeoutMS=10000)
-    # logger.debug("Connected to social_graph_mongodb")
+        social_graph_client = MongoClient(
+            "social-graph-mongodb", port, waitQueueTimeoutMS=10000
+        )
 
     # Make index for user db
-    user_db = social_graph_client['user']
-    user_collection = user_db['user']
+    user_db = social_graph_client["user"]
+    user_collection = user_db["user"]
     user_collection.delete_many({})
-    user_collection.create_index([('user_id', pymongo.ASCENDING)], name='user_id', unique=True)
+    user_collection.create_index(
+        [("user_id", pymongo.ASCENDING)], name="user_id", unique=True
+    )
 
     # Make Index for social graph db
-    social_graph_db = social_graph_client['social_graph']
-    social_graph_collection = social_graph_db['social_graph']
+    social_graph_db = social_graph_client["social_graph"]
+    social_graph_collection = social_graph_db["social_graph"]
     social_graph_collection.delete_many({})
-    social_graph_collection.create_index([('user_id', pymongo.ASCENDING)], name='user_id', unique=True)
+    social_graph_collection.create_index(
+        [("user_id", pymongo.ASCENDING)], name="user_id", unique=True
+    )
 
     def register(first_name, last_name, username, password, user_id=None):
         if user_id is None:
             user_id = random.getrandbits(64)
         document = {
-            'first_name': first_name,
-            'last_name': last_name,
-            'username': username,
-            'password': password,
-            'user_id': user_id
+            "first_name": first_name,
+            "last_name": last_name,
+            "username": username,
+            "password": password,
+            "user_id": user_id,
         }
         user_collection.insert_one(document)
 
     def follow(user_id, followee_id):
-        social_graph_collection.find_one_and_update(filter={'user_id': user_id},
-                                                    update={
-                                                        '$push': {'followees': followee_id}},
-                                                    upsert=True)
+        social_graph_collection.find_one_and_update(
+            filter={"user_id": user_id},
+            update={"$push": {"followees": followee_id}},
+            upsert=True,
+        )
 
     # Register User
     for user_id in range(1, 1000):
-        register(first_name='first_name_' + str(user_id),
-                 last_name='last_name_' + str(user_id),
-                 username='username_' + str(user_id),
-                 password='password_' + str(user_id),
-                 user_id=user_id)
+        register(
+            first_name=f"first_name_{str(user_id)}",
+            last_name=f"last_name_{str(user_id)}",
+            username=f"username_{str(user_id)}",
+            password=f"password_{str(user_id)}",
+            user_id=user_id,
+        )
     # Follow
     follow(4, 1)
     follow(5, 1)
 
-    # Insanity Check
-    # cursor = user_collection.find({})
-    # for document in cursor:
-    #     logger.debug(document)
-
     print("Done making social graph!")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     print("Starting InitSocialGraph Container")
     init_mongodbs()
     init_social_graph()
