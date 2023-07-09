@@ -843,9 +843,9 @@ class ModuleConfigClass:
     deployment_zip_dir: str = f"{output_path_dir}/deployment_zip_dir"
     hybrid_code_dir: str = f"{output_path_dir}/hybrid_vm"
     hybrid_code_file_name: str = "compiler_generated_hybrid_code"
-    bucket_for_hybrid_code: str = "coco-hybrid-bucket-mj"
+    bucket_for_hybrid_code: str = "microblend-hybrid-bucket-mj"
     bucket_for_lambda_handler_zip: str = "faas-code-deployment-bucket"
-    # log_folder_dir: str = "coco-hybrid-bucket"
+    # log_folder_dir: str = "microblend-hybrid-bucket"
 
 
 class ImportAndFunctionAnalyzer(ast.NodeVisitor):
@@ -1956,7 +1956,7 @@ def download_output_to_vm():
                         ctx=ast.Load(),
                     ),
                     args=[
-                        ast.Str(s="bucket-for-coco-compiler"),
+                        ast.Str(s="bucket-for-microblend-compiler"),
                         ast.Name(id="result", ctx=ast.Load()),
                         ast.BinOp(
                             left=ast.Str(s="/tmp/"),
@@ -2406,7 +2406,7 @@ def make_obj_for_uploading_return_obj_to_s3(return_object_list):
                         op=ast.Add(),
                         right=ast.Name(id=each_input_param, ctx=ast.Load()),
                     ),
-                    ast.Str(s="bucket-for-coco-compiler"),
+                    ast.Str(s="bucket-for-microblend-compiler"),
                     ast.Name(id=each_input_param, ctx=ast.Load()),
                 ],
                 keywords=[],
