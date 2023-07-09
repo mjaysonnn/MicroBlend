@@ -7,6 +7,10 @@ from pathlib import Path
 
 
 def load_config():
+    """
+    Load the configuration file.
+    :return: configuration dictionary
+    """
     config = configparser.ConfigParser()
     config_path = Path(__file__).parent.parent.absolute() / "utils" / "config.ini"
     config.read(config_path)
@@ -16,6 +20,10 @@ def load_config():
 
 
 class ModuleConfiguration:
+    """
+    A class representing the configuration of the module.
+    """
+
     def __init__(self):
         conf_dict = load_config()
         self.server_config = conf_dict.get("Server")

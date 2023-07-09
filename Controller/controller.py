@@ -1491,9 +1491,7 @@ def start_policy():
             logger.debug(f"\twake up after {sleep_time:.2f}")
 
             # Make autoscaling decision & Run in background
-            autoscaling_task = threading.Thread(
-                target=make_autoscaling_decision_and_provision
-            )
+            autoscaling_task = threading.Thread(target=make_autoscaling_decision_and_provision)
             autoscaling_task.start()
 
     return
@@ -1726,6 +1724,9 @@ def get_statistics(show_all_durations=False):
 
 
 def show_statistics():
+    """
+    Show statistics
+    """
     logger.debug(f"\tViolated durations: {duration_info['violated_duration_list']}")
     logger.debug(f"\tDuration list: {duration_info['duration_list']}")
     logger.debug(f"\tLambda duration list: {duration_info['lambda_duration_list']}")

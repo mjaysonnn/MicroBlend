@@ -46,6 +46,9 @@ class ComposePostServiceParameters:
             self.media_types.append("PIC")
 
     def generate_post_class_input(self, req_id=None):
+        """
+        Generate the input for the Post class.
+        """
         if req_id is None:
             req_id = random.getrandbits(63)
 
