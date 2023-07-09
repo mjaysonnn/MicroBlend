@@ -14,36 +14,31 @@ import astor
 import boto3
 
 
-# from compiler_module import loadbalancer_configuration, original_code
-# import loadbalancer
-
-class ModuleConfigClass:
+class ModuleConfig:
     """
-    # Implements a class for storing the configuration of the compiler module.
+    Implements a class for storing the configuration of the compiler module.
     """
     benchmark_dir = "../BenchmarkApplication"
     file_name = ""
 
 
-compiler_module_config = ModuleConfigClass()
-benchmark_dir = compiler_module_config.benchmark_dir
-file_name = compiler_module_config.file_name
+module_config = ModuleConfig()
+benchmark_dir = module_config.benchmark_dir
+file_name = module_config.file_name
 
 # Logging Configuration
-modules_for_removing_debug = ["urllib3", "s3transfer", "boto3", "botocore",
-                              "urllib3", "requests", "paramiko", ]
+modules_for_removing_debug = ["urllib3", "s3transfer", "boto3", "botocore", "urllib3", "requests", "paramiko"]
+
 for name in modules_for_removing_debug:
     logging.getLogger(name).setLevel(logging.CRITICAL)
 
 logger = logging.getLogger(__name__)
 logger.propagate = False
-logFormatter = logging.Formatter(
-    "%(asctime)s [%(levelname)-6s] [%(filename)s:%(lineno)-4s]  %(message)s"
-)
+log_formatter = logging.Formatter("%(asctime)s [%(levelname)-6s] [%(filename)s:%(lineno)-4s]  %(message)s")
 
-consoleHandler = logging.StreamHandler()
-consoleHandler.setFormatter(logFormatter)
-logger.addHandler(consoleHandler)
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
+logger.addHandler(console_handler)
 logger.setLevel(logging.DEBUG)
 
 CREDENTIALS = {}
@@ -799,7 +794,6 @@ def put_faas_pragma(beu_pragma_to_add, func_info_class):
     ast.fix_missing_locations(func_info_class.ast_object)
 
 
-
 def put_iaas_pragma(func_info_class, pragma_class):
     """
     Put IaaS Pragma -> No metrics needed
@@ -813,7 +807,6 @@ def put_iaas_pragma(func_info_class, pragma_class):
         func_info_class.ast_object.body.insert(0, pragma_node)
 
     ast.fix_missing_locations(func_info_class.ast_object)
-
 
 
 def put_pragma_comment_in_func(func_info_class: FunctionDefinition):
