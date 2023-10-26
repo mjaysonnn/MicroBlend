@@ -1,3 +1,36 @@
+"""
+Run workload and scaling policy with compiler
+
+SYNOPSIS
+========
+::
+    python3 controller.py
+
+DESCRIPTION
+===========
+1. Find user pragma in the function
+2. Open Initial Resources
+3. Start workload and scaling policy
+4. When provisioning, use the compiler to make a hybrid case if necessary
+
+ENVIRONMENT
+==========
+Do configuration before running the workload
+
+    USE_CASE_FOR_EXPERIMENTS
+
+    LoadBalancer Configuration
+        AMI_ID
+        INSTANCE_WORKERS
+        WORKLOAD_CHOICE
+        NUMBER_OF_INSTANCES
+        CPU IDLE PERCENT
+        use_case_for_experiments
+
+    Module Configuration
+
+
+"""
 import ast
 import copy
 import itertools
