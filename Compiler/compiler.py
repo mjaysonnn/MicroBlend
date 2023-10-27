@@ -1,36 +1,3 @@
-"""
-Run workload and scaling policy with compiler
-
-SYNOPSIS
-========
-::
-    python3 controller.py
-
-DESCRIPTION
-===========
-1. Find user pragma in the function
-2. Open Initial Resources
-3. Start workload and scaling policy
-4. When provisioning, use the compiler to make a hybrid case if necessary
-
-ENVIRONMENT
-==========
-Do configuration before running the workload
-
-    USE_CASE_FOR_EXPERIMENTS
-
-    LoadBalancer Configuration
-        AMI_ID
-        INSTANCE_WORKERS
-        WORKLOAD_CHOICE
-        NUMBER_OF_INSTANCES
-        CPU IDLE PERCENT
-        use_case_for_experiments
-
-    Module Configuration
-
-
-"""
 import ast
 import copy
 import itertools
@@ -115,7 +82,7 @@ class FunctionWithServiceCandidate:
 
 @dataclass
 class UserInputClass:
-    original_file: str = "image_processing_1_1.py"
+    original_file: str = "media_service.py"
     target_goal_config: TargetGoalConfig = field(default_factory=TargetGoalConfig)
     vm_runtime_config: VMRuntimeConfig = field(default_factory=VMRuntimeConfig)
 
@@ -3028,10 +2995,6 @@ def create_lambda_function_by_cli(lambda_deploy_info, whole_info):
 
 
 def map_func_to_func_arn(whole_ast_info: WholeASTInfoClass) -> None:
-    """
-    Make an assignment object that maps function names to function name ARNs
-    e.g., {"resize" :"image_processing_resize"}
-    """
     logger.info("Make assignment object that maps function names to function name ARNs")
 
     if whole_ast_info.offloading_whole_application:

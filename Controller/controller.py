@@ -1,3 +1,40 @@
+"""
+Run workload and scaling policy with compiler
+
+SYNOPSIS
+========
+::
+    python3 controller.py
+
+DESCRIPTION
+===========
+1. Find user pragma in the function
+2. Open Initial Resources
+3. Start workload and scaling policy
+4. When provisioning, use the compiler to make a hybrid case
+
+ENVIRONMENT
+==========
+Do configuration before running the workload
+
+    USE_CASE_FOR_EXPERIMENTS
+
+    LoadBalancer Configuration
+        AMI_ID
+        INSTANCE_WORKERS
+        WORKLOAD_CHOICE
+        NUMBER_OF_INSTANCES
+        CPU IDLE PERCENT
+        use_case_for_experiments
+
+    Module Configuration
+
+NOTES
+================
+At the same time, compiler would make hybrid code and while provision, controller.py would reroute request to run hybrid code through Loadcat.
+
+
+"""
 import asyncio
 import base64
 import contextlib
@@ -35,6 +72,9 @@ from botocore.exceptions import ClientError
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
+
+# Assume the compiler code is in current directory
+from compiler import process
 
 sys.path.append("utils")
 from fetch_logging_configuration import init_logger, empty_log_file
