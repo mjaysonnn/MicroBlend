@@ -29,8 +29,10 @@ Do configuration before running the workload
     Module Configuration
 
 NOTES
-================
 Once the workload is deployed, the one of microservices will  initiate Prometheus, which will be responsible for collecting `runq_latency` metrics for each microservice. This data can be subsequently used to feed into a training model, enabling the selection of microservices that are best suited to meet the Service Level Objectives (SLO). During the provisioning phase, a compiler is utilized to transform the microservice into a Lambda function. Additionally, compiler modifies the orchestrator function, transitioning its calls from a VM-based function to Lambda. And controller.py would reroute request to run hybrid code through Loadcat.
+
+The compiler would make a hybrid code. While provisioning, controller.py would reroute the request to run hybrid code through Loadcat.
+
 
 """
 import asyncio
