@@ -31,7 +31,7 @@ Do configuration before running the workload
 
 NOTES
 ================
-At the same time, compiler would make hybrid code and while provision, controller.py would reroute request to run hybrid code through Loadcat.
+The compiler would make a hybrid code. While provisioning, controller.py would reroute the request to run hybrid code through Loadcat.
 
 
 """
