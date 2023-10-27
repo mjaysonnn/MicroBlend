@@ -1479,6 +1479,12 @@ def scale_up_resources(num_of_excess_server):
 
     # Case 2 Use Lambda when provisioning (MicroBlend)
     if provisioning_method == "microblend":
+        """
+        This is the point where the compiler will generate hybrid code and coordinator code 
+        that triggers the Lambda-based microservice. This code is then distributed across servers
+        via AWS S3. During autoscaling, Loadcat will direct requests to the coordinator-code 
+        which interacts with Lambda-based microservices.
+        """
         t = threading.Thread(
             target=launch_ec2_and_add_to_loadbalancer, args=[num_of_excess_server]
         )
