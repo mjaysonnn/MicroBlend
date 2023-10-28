@@ -149,13 +149,12 @@ with open(source_file_name, "r") as original_code:
     function_candidates = compiler.extract_and_print_function(original_code, source_file_name)
 
 logger.info(f"Function candidates: {function_candidates}")
-exit()
 
 # Load balancer information
 lb_addr = conf_dict.external_lb_config.get("external-loadbalancer-addr",
-                                           None)  # Fetch your own external load balancer address
+                                           None)  # Configure your own external load balancer address
 lb_port = conf_dict.external_lb_config.get("external-loadbalancer-port",
-                                           None)  # Fetch your own external load balancer address
+                                           None)  # Configure your own external load balancer address
 
 # Info about requests
 duration_info = {
