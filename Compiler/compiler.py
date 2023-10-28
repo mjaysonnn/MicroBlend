@@ -145,14 +145,14 @@ def user_annotation_for_application() -> UserInputClass:
     return user_input_class
 
 
-def make_dataclass_that_contains_whole_info(original_code_script, original_filename):
+def generate_original_and_copied_ast_info(original_code_script, original_filename):
     """
     save original code and module object and copied module object
     """
     # Make AST object
     original_ast: ast.Module = ast.parse(original_code_script.read())
 
-    # Make copied module object
+    # Create a deep copy of the AST for analysis
     module_for_analysis = copy.deepcopy(original_ast)
 
     # Return dataclass
@@ -188,37 +188,37 @@ class ServiceTypeForFunction:
 
 @dataclass
 class LambdaConfig:
-    memory_size: int = 512
+    memory: int = 512
     timeout: int = 100
-    runtime: str = "py37"
-    function_name: str = None
+    runtime_version: str = "py37"
+    func_name: str = None
 
 
 @dataclass
 class FunctionMetricRules:
-    use_default_value_for_cpu_util: bool = True
+    cpu_util_use_default_value: bool = True
     cpu_util_operand: float = 40
     cpu_util_operator: str = ">"
 
-    use_default_value_for_memory_util: bool = True
+    memory_util_use_default_value: bool = True
     memory_util_operand: float = 30
     memory_util_operator: str = ">"
 
-    use_default_value_for_arrival_rate: bool = True
+    arrival_rate_use_default_value: bool = True
     arrival_rate_operand: int = 5
     arrival_rate_operator: str = ">"
 
 
 @dataclass
-class Boto3AndJsonImportClass:
+class ModuleImportClass:
     ast_object: Any
 
 
 @dataclass(order=True)
 class NonFunctionInfoClass(ASTObjectInfoClass):
-    non_func_object_type: str = None
-    import_name_list: set = field(default_factory=set)
-    assign_targets: list = field(default_factory=list)
+    object_type: str = None
+    imports: set = field(default_factory=set)
+    assignments: list = field(default_factory=list)
     description: str = None
 
 
@@ -227,17 +227,24 @@ class FunctionDefinition(ASTObjectInfoClass):
     """
     Function definition object
     """
+    # Basic Information
     func_name: str = False
-    import_name_list: set = field(default_factory=set)
-    assign_targets: list = field(default_factory=list)
-    function_parameters: list = field(default_factory=list)
-    return_objects: list = field(default_factory=list)
-    return_object_ast: Any = None
-    lambda_runtime_conf: LambdaConfig = field(default_factory=LambdaConfig)
-    function_metric_rules: FunctionMetricRules = field(default_factory=FunctionMetricRules)
     initial_pragma: str = None
     lambda_group_name: str = "Default"
-    func_call_for_lambda_handler: Union[ast.Assign, ast.Expr] = field(default_factory=list)
+
+    # Import and Reference Information
+    imports: set = field(default_factory=set)
+    assigned_targets: list = field(default_factory=list)
+
+    # Function Details
+    parameters: list = field(default_factory=list)
+    return_values: list = field(default_factory=list)
+    return_values_ast: Any = None
+
+    # Lambda Configuration
+    lambda_config: LambdaConfig = field(default_factory=LambdaConfig)
+    function_metric_rules: FunctionMetricRules = field(default_factory=FunctionMetricRules)
+    lambda_handler_call: Union[ast.Assign, ast.Expr] = field(default_factory=list)
 
 
 @dataclass
@@ -349,95 +356,78 @@ class WholeASTInfoClass:
     hybrid_code_module: ast.Module = None
     annotated_code_module_for_user: ast.Module = None
 
-    # If offloading whole application
-    # pragma_exist_in_main_function: bool = False
+    # Offloading info
     offloading_whole_application: bool = False
+    module_info_for_offloading_whole_app: CompilerGeneratedLambda = None
+    deployment_name_for_offloading_whole_app: str = None
 
-    # Import Information
+    # Import info
     import_information: Dict[str, ImportInfoClass] = field(default_factory=dict)
-    # imports_from_python_script: List[str] = field(default_factory=list)
-    boto3_and_json_imports: Dict[str, Boto3AndJsonImportClass] = field(
-        default_factory=dict
-    )
+    boto3_and_json_imports: Dict[str, ModuleImportClass] = field(default_factory=dict)
 
-    # Function and Non-Function and Function Call
-    non_function_object_info: Dict[
-        Union[ast.Expr, ast.Assign], NonFunctionInfoClass
-    ] = field(default_factory=dict)
-
+    # Function and Non-Function info
+    non_function_object_info: Dict[Union[ast.Expr, ast.Assign], NonFunctionInfoClass] = field(default_factory=dict)
     function_information: Dict[str, FunctionDefinition] = field(default_factory=dict)
     function_list_for_annotation: List[str] = field(default_factory=list)
     sort_by_lambda_group: Dict[str, List] = field(default_factory=dict)
-
-    function_call_info_class: Dict[
-        Union[ast.Expr, ast.Assign], FunctionCallInfo
-    ] = field(default_factory=dict)
-
-    # When there is if __main__ object
-    objects_inside_if_main: dict = field(default_factory=defaultdict)
-    function_call_inside_if_main: dict = field(default_factory=defaultdict)
-
-    # # When offloading whole application
-    module_info_for_offloading_whole_app: CompilerGeneratedLambda = None
-    deployment_name_for_offloading_whole_app: str = None
-    #
-    # services_for_function: dict = field(default_factory=defaultdict)
-    parsed_function_info_for_faas: dict = field(default_factory=defaultdict)
-    if_main_object: NonFunctionInfoClass = None
-    # # non_func_object_to_info_class_dict: dict =
-    # # field(default_factory=NonFunctionInfoClass)
+    function_call_info_class: Dict[Union[ast.Expr, ast.Assign], FunctionCallInfo] = field(default_factory=dict)
     func_call_using_lambda: list = field(default_factory=list)
     combined_func_call_using_lambda: Dict[str, List] = field(default_factory=dict)
     lambda_invoke_function: ast.FunctionDef = None
-    # compiler_generated_lambda_handler_dict: dict = field(default_factory=defaultdict)
-    lambda_handler_module_dict: dict = field(default_factory=defaultdict)
-    #
+
+    # if __main__ info
+    objects_inside_if_main: dict = field(default_factory=defaultdict)
+    function_call_inside_if_main: dict = field(default_factory=defaultdict)
+    if_main_object: NonFunctionInfoClass = None
+
+    # Lambda related info
     lambda_function_info: dict = field(default_factory=defaultdict)
     lambda_deployment_zip_info: dict = field(default_factory=defaultdict)
     lambda_config_for_whole_application: LambdaConfig = None
-    # metrics_for_whole_application: FunctionMetricRules = None
-
-    # raw_pragma_and_metrics_in_main_function: list = field(default_factory=list)
-    # main_func_info_parsed_to_loadbalancer: FunctionWithServiceCandidate = None
     map_func_to_func_arn_object: ast.Assign = None
+    lambda_handler_module_dict: dict = field(default_factory=defaultdict)
+    parsed_function_info_for_faas: dict = field(default_factory=defaultdict)
 
 
-def find_user_annotation_in_code(whole_info_class: WholeASTInfoClass):
+def extract_user_annotations(whole_info_class: WholeASTInfoClass):
     """
     Let users choose which functions they want to annotate
     """
 
     logger.info("Find pragma")
 
-    # Get module
-    whole_module = whole_info_class.copied_module_for_analysis
+    # Get the module for analysis
+    analyzed_module = whole_info_class.copied_module_for_analysis
 
-    # Initialize function information and function names to annotate
+    # Dictionary to store information about functions
     func_information = defaultdict(FunctionDefinition)
-    func_names_to_annotate = []
+    functions_for_user_annotation = []
 
-    # Find pragma before annotation
-    for child in ast.iter_child_nodes(whole_module):
-        if isinstance(child, ast.FunctionDef):
+    # Inspect each node in the module for annotations
+    for child_node in ast.iter_child_nodes(analyzed_module):
+        if isinstance(child_node, ast.FunctionDef):
+            function_def = FunctionDefinition(
+                func_name=child_node.name,
+                ast_object=child_node,
+                line_number=child_node.lineno)
+            function_def = find_pragma_in_function(child_node, function_def)
+            logger.debug(f"function_def is {function_def}")
 
-            f_def_class = FunctionDefinition(func_name=child.name, ast_object=child, line_number=child.lineno)
+            # Store function's information
+            func_information[child_node.name] = function_def
 
-            f_def_class = find_pragma_in_function(child, f_def_class)
-
-            # Save function info
-            func_information[child.name] = f_def_class
-
-            # No pragma then compiler will provide user annotation
-            if f_def_class.initial_pragma is None:
-                func_names_to_annotate.append(child.name)
+            # If no user annotation, compiler will provide annotation
+            if function_def.initial_pragma is None:
+                functions_for_user_annotation.append(child_node.name)
 
             # Main function and Pragma BEU FaaS  -> Offloading whole app
-            if f_def_class.initial_pragma == "FaaS" and f_def_class.func_name == "main":
-                logger.info("\tWill offload whole application")
+            if function_def.initial_pragma == "FaaS" and function_def.func_name == "main":
+                logger.info("\tPreparing to offload the entire application...")
                 whole_info_class.offloading_whole_application = True
 
+    # Update the dataclass attributes
     whole_info_class.function_information = dict(func_information)
-    whole_info_class.function_list_for_annotation = func_names_to_annotate
+    whole_info_class.function_list_for_annotation = functions_for_user_annotation
 
 
 def choose_functions_to_annotate(func_names_to_annotate):
@@ -524,17 +514,17 @@ def iterate_comments_and_save_pragma(func_def, function_metric_rules, it):
                 metric_type = next(it)
 
                 if "arrival_rate" in metric_type:
-                    function_metric_rules.use_default_value_for_arrival_rate = False
+                    function_metric_rules.arrival_rate_use_default_value = False
                     function_metric_rules.arrival_rate_operator = next(it)
                     function_metric_rules.arrival_rate_operand = next(it)[:-1]
 
                 elif "cpu_util" in metric_type:
-                    function_metric_rules.use_default_value_for_cpu_util = False
+                    function_metric_rules.cpu_util_use_default_value = False
                     function_metric_rules.cpu_util_operator = next(it)
                     function_metric_rules.cpu_util_operand = next(it)[:-1]
 
                 elif "memory_util" in metric_type:
-                    function_metric_rules.use_default_value_for_memory_util = False
+                    function_metric_rules.memory_util_use_default_value = False
                     function_metric_rules.memory_util_operator = next(it)
                     function_metric_rules.memory_util_operand = next(it)[:-1]
 
@@ -561,31 +551,31 @@ def set_metrics_for_whole_app():
 
     if cpu_util.strip():
         metrics_for_whole_app.cpu_util_operand = int(cpu_util)
-        metrics_for_whole_app.use_default_value_for_cpu_util = False
+        metrics_for_whole_app.cpu_util_use_default_value = False
 
     if cpu_util_operator.strip():
         metrics_for_whole_app.cpu_operator = cpu_util_operator
-        metrics_for_whole_app.use_default_value_for_cpu_util = False
+        metrics_for_whole_app.cpu_util_use_default_value = False
 
     arrival_rate, arrival_rate_operator = "5", ">="
 
     if arrival_rate.strip():
         metrics_for_whole_app.arrival_rate_operand = int(arrival_rate)
-        metrics_for_whole_app.use_default_value_for_arrival_rate = False
+        metrics_for_whole_app.arrival_rate_use_default_value = False
 
     if arrival_rate_operator.strip():
         metrics_for_whole_app.arrival_rate_operator = arrival_rate_operator
-        metrics_for_whole_app.use_default_value_for_arrival_rate = False
+        metrics_for_whole_app.arrival_rate_use_default_value = False
 
     memory_util, memory_util_operators = "", ""
 
     if memory_util.strip():
         metrics_for_whole_app.memory_util_operand = int(memory_util)
-        metrics_for_whole_app.use_default_value_for_memory_util = False
+        metrics_for_whole_app.memory_util_use_default_value = False
 
     if memory_util_operators.strip():
         metrics_for_whole_app.memory_util_operator = memory_util_operators
-        metrics_for_whole_app.use_default_value_for_memory_util = False
+        metrics_for_whole_app.memory_util_use_default_value = False
 
     return metrics_for_whole_app
 
@@ -597,7 +587,7 @@ def set_lambda_config_for_whole_app():
     # lambda_memory = input(f"lambda_config : [memory_size (512):\n")
     lambda_memory = ""
     if lambda_memory.strip():
-        lambda_config_for_whole_app.memory_size = lambda_memory
+        lambda_config_for_whole_app.memory = lambda_memory
 
     lambda_timeout = ""
     if lambda_timeout.strip():
@@ -605,11 +595,11 @@ def set_lambda_config_for_whole_app():
 
     lambda_runtime = ""
     if lambda_runtime.strip():
-        lambda_config_for_whole_app.runtime = lambda_runtime
+        lambda_config_for_whole_app.runtime_version = lambda_runtime
 
     lambda_name = "resnet18_lambda"  # FIXME: for test
     if lambda_name.strip():
-        lambda_config_for_whole_app.function_name = lambda_name
+        lambda_config_for_whole_app.func_name = lambda_name
 
     return lambda_config_for_whole_app
 
@@ -628,11 +618,11 @@ def provide_user_with_memory_utilization(function_info):
 
     if memory_util != "":
         function_info.function_metric_rules.memory_util_operand = int(memory_util)
-        function_info.function_metric_rules.use_default_value_for_memory_util = False
+        function_info.function_metric_rules.memory_util_use_default_value = False
 
     if memory_util_operators != "":
         function_info.function_metric_rules.memory_util_operator = memory_util_operators
-        function_info.function_metric_rules.use_default_value_for_memory_util = False
+        function_info.function_metric_rules.memory_util_use_default_value = False
 
 
 def provide_user_with_arrival_rate(function_info):
@@ -643,13 +633,13 @@ def provide_user_with_arrival_rate(function_info):
 
     if arrival_rate != "":
         function_info.function_metric_rules.arrival_rate_operand = int(arrival_rate)
-        function_info.function_metric_rules.use_default_value_for_arrival_rate = False
+        function_info.function_metric_rules.arrival_rate_use_default_value = False
 
     if arrival_rate_operator != "":
         function_info.function_metric_rules.arrival_rate_operator = (
             arrival_rate_operator
         )
-        function_info.function_metric_rules.use_default_value_for_arrival_rate = False
+        function_info.function_metric_rules.arrival_rate_use_default_value = False
 
 
 def provide_user_with_cpu_utilization(function_info):
@@ -659,11 +649,11 @@ def provide_user_with_cpu_utilization(function_info):
 
     if cpu_util != "":
         function_info.function_metric_rules.cpu_util_operand = int(cpu_util)
-        function_info.function_metric_rules.use_default_value_for_cpu_util = False
+        function_info.function_metric_rules.cpu_util_use_default_value = False
 
     if cpu_util_operator != "":
         function_info.function_metric_rules.cpu_operator = cpu_util_operator
-        function_info.function_metric_rules.use_default_value_for_cpu_util = False
+        function_info.function_metric_rules.cpu_util_use_default_value = False
 
 
 def provide_user_with_lambda_config(function_info, each_func_name):
@@ -672,21 +662,21 @@ def provide_user_with_lambda_config(function_info, each_func_name):
     #                              f': [memory_size (512):\n')
     lambda_config_memory = ""  # FIXME: for test -> comment later
     if lambda_config_memory.strip():
-        function_info.lambda_runtime_conf.memory_size = lambda_config_memory
+        function_info.lambda_config.memory = lambda_config_memory
 
     # timeout
     # lambda_config_timeout = input(f'{each_func_name} lambda_config '
     #                               f': [time_out (100):\n')
     lambda_config_timeout = ""  # FIXME: for test
     if lambda_config_timeout.strip():
-        function_info.lambda_runtime_conf.timeout = lambda_config_timeout
+        function_info.lambda_config.timeout = lambda_config_timeout
 
     # Lambda Runtime
     # lambda_config_runtime = input(f'{each_func_name} lambda_config : '
     #                               f'[runtime (py37):\n')
     lambda_config_runtime = ""  # FIXME: for test
     if lambda_config_runtime.strip():
-        function_info.lambda_runtime_conf.runtime = lambda_config_runtime
+        function_info.lambda_config.runtime_version = lambda_config_runtime
 
 
 def save_service_per_function(service_for_functions, func_service, each_func_name):
@@ -735,13 +725,13 @@ def parse_and_save_info_for_each_function(whole_ast_info: WholeASTInfoClass):
             else:
                 metrics_for_scaling_policy = function_info.function_metric_rules
                 metrics_dict = defaultdict(list)
-                if not metrics_for_scaling_policy.use_default_value_for_memory_util:
+                if not metrics_for_scaling_policy.memory_util_use_default_value:
                     metrics_dict["memory_util"].append(metrics_for_scaling_policy.memory_util_operand)
                     metrics_dict["memory_util"].append(metrics_for_scaling_policy.memory_util_operator)
-                if not metrics_for_scaling_policy.use_default_value_for_cpu_util:
+                if not metrics_for_scaling_policy.cpu_util_use_default_value:
                     metrics_dict["cpu_util"].append(metrics_for_scaling_policy.cpu_util_operand)
                     metrics_dict["cpu_util"].append(metrics_for_scaling_policy.cpu_util_operator)
-                if not metrics_for_scaling_policy.use_default_value_for_arrival_rate:
+                if not metrics_for_scaling_policy.arrival_rate_use_default_value:
                     metrics_dict["arrival_rate"].append(metrics_for_scaling_policy.arrival_rate_operand)
                     metrics_dict["arrival_rate"].append(metrics_for_scaling_policy.arrival_rate_operator)
                 function_with_service_candidate[each_function_name] = FunctionWithServiceCandidate(
@@ -765,17 +755,17 @@ def put_faas_pragma(beu_pragma_to_add, func_info_class):
 
     # Add scaling policy metrics if user annotation
     metrics_to_add = []
-    if not metrics_for_lb.use_default_value_for_arrival_rate:
+    if not metrics_for_lb.arrival_rate_use_default_value:
         metrics_to_add.append(
             f"arrival_rate {metrics_for_lb.arrival_rate_operator} {metrics_for_lb.arrival_rate_operand}"
         )
 
-    if not metrics_for_lb.use_default_value_for_cpu_util:
+    if not metrics_for_lb.cpu_util_use_default_value:
         metrics_to_add.append(
             f"cpu_util {metrics_for_lb.cpu_operator} {metrics_for_lb.cpu_util_operand}"
         )
 
-    if not metrics_for_lb.use_default_value_for_memory_util:
+    if not metrics_for_lb.memory_util_use_default_value:
         metrics_to_add.append(
             f"memory_util {metrics_for_lb.memory_util_operator} {metrics_for_lb.memory_util_operand}"
         )
@@ -821,24 +811,27 @@ def put_pragma_comment_in_func(func_info_class: FunctionDefinition):
 
 @dataclass
 class ModuleConfigClass:
-    # File Name
-    f_name: str = "resnet18_vm_for_test.py"
+    # Basic information
+    file_name: str
 
-    # Workload Result Log
-    result_logfile_name: str = "log_folder/result_log/microblend_result.log"
-    worker_log_file: str = "log_folder/workers_from_lb/workers.json"
+    # Log configurations
+    result_log_path: str = "log_folder/result_log/microblend_result.log"
+    worker_log_path: str = "log_folder/workers_from_lb/workers.json"
 
-    # Compiler Result Log
-    bench_dir: str = "../BenchmarkApplication"
-    module_dir: str = "import_modules"
-    output_path_dir: str = "output"
-    lambda_code_dir_path: str = f"{output_path_dir}/lambda_codes"
-    deployment_zip_dir: str = f"{output_path_dir}/deployment_zip_dir"
-    hybrid_code_dir: str = f"{output_path_dir}/hybrid_vm"
-    hybrid_code_file_name: str = "compiler_generated_hybrid_code"
-    bucket_for_hybrid_code: str = "microblend-hybrid-bucket-mj"
-    bucket_for_lambda_handler_zip: str = "faas-code-deployment-bucket"
-    # log_folder_dir: str = "microblend-hybrid-bucket"
+    # Compiler directories and paths
+    benchmark_directory: str = "../Workload"
+    module_directory: str = "import_modules"
+    output_directory: str = "output"
+
+    # Derived paths from output directory
+    lambda_code_path: str = f"{output_directory}/lambda_codes"
+    deployment_zip_path: str = f"{output_directory}/deployment_zip_dir"
+    hybrid_code_directory: str = f"{output_directory}/hybrid_vm"
+
+    # File names and S3 buckets
+    hybrid_code_filename: str = "compiler_generated_hybrid_code"
+    hybrid_code_bucket: str = "microblend-hybrid-bucket-mj"
+    lambda_handler_zip_bucket: str = "faas-code-deployment-bucket"
 
 
 class ImportAndFunctionAnalyzer(ast.NodeVisitor):
@@ -846,31 +839,34 @@ class ImportAndFunctionAnalyzer(ast.NodeVisitor):
     Analyze import and function
     """
 
-    def __init__(self, whole_ast_info: WholeASTInfoClass, config_info: ModuleConfigClass):
-        self.whole_ast_info = whole_ast_info
-        self.file_name = whole_ast_info.file_name
-        self.target_source_code = whole_ast_info.copied_module_for_analysis
-        self.config_info = config_info
+    def __init__(self, ast_info: WholeASTInfoClass, config: ModuleConfigClass):
+        self.ast_info = ast_info
+        self.file_name = ast_info.file_name
+        self.target_source_code = ast_info.copied_module_for_analysis
+        self.config_info = config
+
+    def _extract_import_name(self, alias):
+        """
+        Extract the main part of an import statement, handling "as" aliases.
+        E.g., "import numpy as np" -> "numpy"
+        """
+        return alias.name.split(".")[0] if "." in alias.name else alias.name
 
     def visit_Import(self, node):
         """
         Handle import numpy or import numpy as np
         """
-        import_info_class = ImportInfoClass(line_number=node.lineno, ast_object=node)
-
-        import_name_to_add = node.names[0].name
+        primary_import_name = self._extract_import_name(node.names[0])
+        import_info = ImportInfoClass(line_number=node.lineno, ast_object=node)
 
         for alias in node.names:
-            if "." in alias.name:
-                import_info_class.import_name = alias.name.split(".")[0]
-                import_name_to_add = alias.name.split(".")[0]
-            else:
-                import_info_class.import_name = alias.name
+            import_name = self._extract_import_name(alias)
+            import_info.import_name = import_name
 
-            if alias.asname is not None:
-                import_info_class.import_as.append(alias.asname)
+            if alias.asname:
+                import_info.import_as.append(alias.asname)
 
-        self.whole_ast_info.import_information[import_name_to_add] = import_info_class
+        self.ast_info.import_information[primary_import_name] = import_info
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node):
@@ -889,127 +885,144 @@ class ImportAndFunctionAnalyzer(ast.NodeVisitor):
             else:
                 import_info_class.from_import.append(alias.name)
 
-        self.whole_ast_info.import_information[node_module_name] = import_info_class
+        self.ast_info.import_information[node_module_name] = import_info_class
         self.generic_visit(node)
 
-    def find_import_that_is_python_code(self, target_file_name):
+    def _fetch_python_script_names(self, target_file_name):
+        """
+        Fetch all Python script names in the benchmark directory except the target_file_name.
+        """
+
+        python_script_names = []
+
+        # Store the current working directory to return to it later
+        initial_directory = os.getcwd()
+
+        try:
+            # Change the directory to the benchmark directory specified in the config
+            os.chdir(self.config_info.benchmark_directory)
+
+            # Use a list comprehension to fetch all the python script names
+            # Exclude the target file and its base name
+            python_script_names.extend(
+                file.replace(".py", "")
+                for file in os.listdir()
+                if (
+                        file.endswith(".py")
+                        and file != os.path.basename(target_file_name)
+                        and file != target_file_name
+                )
+            )
+        finally:
+            # Return to the initial directory regardless of any exceptions
+            os.chdir(initial_directory)
+
+        return python_script_names
+
+    def find_imports_from_python_scripts(self, target_file_name):
         """
         Iterate through benchmark directory and find code that is ".py"
         """
+        # Get a list of all python scripts in the benchmark directory excluding the target_file_name
+        python_script_imports = self._fetch_python_script_names(target_file_name)
 
-        imports_from_python_script = []
+        logger.debug(python_script_imports)
 
-        b_dir = self.config_info.benchmark_dir
-        current_dir = os.getcwd()
+        # For each import in the AST info, check if it matches a name from python_script_imports
+        # If it does, set the 'from_python_script' flag to True for that import
+        for _, import_info in self.ast_info.import_information.items():
+            if import_info.import_name in python_script_imports:
+                import_info.from_python_script = True
 
-        try:
-            os.chdir(b_dir)
-
-            # Iterate through directory and find python code that is ".py"
-            for file in os.listdir(os.getcwd()):
-                filename = os.fsdecode(file)
-                if (
-                        filename.endswith(".py")
-                        and filename != os.path.basename(file)
-                        and filename != target_file_name
-                ):
-                    imports_from_python_script.append(filename.replace(".py", ""))
-
-            # Iterate imports and mark "True" if import is from python code
-            for _, import_info_class in self.whole_ast_info.import_information.items():
-                if import_info_class.import_name in imports_from_python_script:
-                    import_info_class.from_python_script = True
-
-        finally:
-            os.chdir(current_dir)
-
-    def find_func_call_in_func_obj_assign(
-            self, assign_targets_list, child: ast.Assign, node: ast.FunctionDef
+    def find_function_calls_within_assignment(
+            self, assign_targets, assignment_node: ast.Assign, function_node: ast.FunctionDef
     ):
         """
         Find function call in assign object in function object
         """
 
-        assign_obj = child.value
+        # Check if the assigned value is a function call or a binary operation
+        assigned_value = assignment_node.value
+        if not isinstance(assigned_value, (ast.Call, ast.BinOp)):
+            return
 
-        if isinstance(assign_obj, (ast.Call, ast.BinOp)):
-            assign_node_value_obj = assign_obj
+            # Scan all child nodes of the assigned value
+        for child_node in ast.walk(assigned_value):
+            # If a function name is detected
+            if isinstance(child_node, ast.Name) and child_node.id in self.ast_info.function_information:
+                func_call_details = FunctionCallInfo(
+                    line_number=assignment_node.lineno,
+                    ast_object=assignment_node,
+                    object_type="Assign",
+                    caller_object=function_node,
+                    caller_object_name=function_node.name,
+                    callee_object=assigned_value,
+                    callee_object_name=child_node.id,
+                    assign_targets=assign_targets,
+                    call_func_params=assigned_value.args if isinstance(assigned_value, ast.Call) else [],
+                )
 
-            for assign_node_value_child in ast.walk(assign_node_value_obj):
-                if isinstance(assign_node_value_child, ast.Name):
-                    name_id = assign_node_value_child.id
+                # Store the detected function call details for further analysis
+                self.ast_info.function_call_info_class[assignment_node] = func_call_details
 
-                    func_list = list(self.whole_ast_info.function_information.keys())
-                    if name_id in func_list:
-                        func_call_info_class = FunctionCallInfo(
-                            line_number=child.lineno,
-                            ast_object=child,
-                            object_type="Assign",
-                            caller_object=node,
-                            caller_object_name=node.name,
-                            callee_object=assign_node_value_obj,
-                            callee_object_name=name_id,
-                            assign_targets=assign_targets_list,
-                            call_func_params=assign_node_value_obj.args,
-                        )
-
-                        self.whole_ast_info.function_call_info_class[child] = func_call_info_class
-
-    def find_import_in_func_obj_assign(
-            self, child, assign_target_list, each_func_info: FunctionDefinition
+    def identify_imports_in_function_assignment(
+            self, child, assign_target_list, function_info: FunctionDefinition
     ):
         """
         Find import in assign object in function object
         """
-        assign_obj = child.value
+        # Extract the value being assigned
+        assignment_value = child.value
 
-        if isinstance(assign_obj, (ast.Call, ast.BinOp)):
-            value_obj = assign_obj
+        # If the value is a function call or binary operation, inspect it for potential imports
+        if isinstance(assignment_value, (ast.Call, ast.BinOp)):
+            for node_child in ast.walk(assignment_value):
+                self._identify_imports_in_assignment(node_child, assign_target_list, function_info)
 
-            for assign_node_value_child in ast.walk(value_obj):
-                self.find_import_list_from_assign_target(
-                    assign_node_value_child, assign_target_list, each_func_info
-                )
+        # Store the recognized assignment targets in the function information
+        function_info.assigned_targets.extend(assign_target_list)
 
-        each_func_info.assign_targets.extend(assign_target_list)
-
-    def find_import_list_from_assign_target(
+    def _identify_imports_in_assignment(
             self,
             assign_node_value_child,
             assign_targets_list,
-            specific_func_dict: (NonFunctionInfoClass, FunctionDefinition),
+            specific_func_info: (NonFunctionInfoClass, FunctionDefinition),
     ):
         """
         Find import list from assign target
         """
-        logger.debug(specific_func_dict)
-        logger.debug(assign_node_value_child)
+        # Early exit if the child node isn't of the 'ast.Name' type
+        if not isinstance(assign_node_value_child, ast.Name):
+            return
 
-        if isinstance(assign_node_value_child, ast.Name):
-            value_obj = assign_node_value_child.id
+        # Extract the identifier from the child node
+        value_id = assign_node_value_child.id
 
-            for each_assign_target in assign_targets_list:
-                for (_, import_info) in self.whole_ast_info.import_information.items():
-                    if (
-                            value_obj in import_info.import_as
-                            or value_obj == import_info.import_name
-                            or value_obj in import_info.assign_targets_from_non_func
-                    ):
-                        logger.debug(import_info.import_name)
+        #  Loop through each assignment target
+        for each_assign_target in assign_targets_list:
+            # Filter out the matching import information based on the extracted identifier
+            matched_imports = [
+                import_info
+                for import_info in self.ast_info.import_information.values()
+                if value_id in import_info.import_as
+                   or value_id == import_info.import_name
+                   or value_id in import_info.assign_targets_from_non_func
+            ]
+            # For each matched import, add it to the associated data structures
+            for import_info in matched_imports:
+                logger.debug(import_info.import_name)
+                import_info.assign_targets_from_non_func.add(each_assign_target)
+                specific_func_info.imports.add(import_info.import_name)
 
-                        import_info.assign_targets_from_non_func.add(each_assign_target)
-                        specific_func_dict.import_name_list.add(import_info.import_name)
-                        logger.debug(pformat(specific_func_dict))
-
-    def find_func_call_in_func_obj_expr(self, expr_value, expr_node, func_node):
+    def identify_function_calls(self, expression_value, expr_node, func_node):
         """
         Find function call in expr object in function object
         """
-        for expr_value_child in ast.walk(expr_value):
+        for expr_value_child in ast.walk(expression_value):
             if isinstance(expr_value_child, ast.Name):
                 name_id = expr_value_child.id
 
-                func_list = list(self.whole_ast_info.function_information.keys())
+                func_list = list(self.ast_info.function_information.keys())
 
                 if name_id in func_list:
                     func_call_info_class = FunctionCallInfo(
@@ -1018,126 +1031,148 @@ class ImportAndFunctionAnalyzer(ast.NodeVisitor):
                         object_type="Expr",
                         caller_object=func_node,
                         caller_object_name=func_node.name,
-                        callee_object=expr_value,
+                        callee_object=expression_value,
                         callee_object_name=name_id,
-                        call_func_params=expr_value.args,
+                        call_func_params=expression_value.args,
                     )
-                    self.whole_ast_info.function_call_info_class[expr_node] = func_call_info_class
+                    self.ast_info.function_call_info_class[expr_node] = func_call_info_class
 
-    def find_imports_in_expr_obj(self, expr_value, specific_func_dict: FunctionDefinition):
+    def find_imports_in_expression(self, expr_value, specific_func_dict: FunctionDefinition):
         """
         Find import in expr object in function object
         """
-        for child_of_expr_value in ast.walk(expr_value):
-            if isinstance(child_of_expr_value, ast.Name):
-                self.find_import_in_name_object(child_of_expr_value, specific_func_dict)
+        for child in ast.walk(expr_value):
+            if isinstance(child, ast.Name):
+                self.identify_imports_in_name(child, specific_func_dict)
 
-    def find_import_in_name_object(self, expr_value_child, each_func_info):
+    def identify_imports_in_name(self, name_node, func_info):
         """
         Find import in name object
         """
-        name_id = expr_value_child.id
+        node_id = name_node.id
 
-        for _, import_info in self.whole_ast_info.import_information.items():
-            if (
-                    name_id in import_info.import_as + import_info.from_import
-                    or name_id == import_info.import_name
-                    or name_id in import_info.assign_targets_from_non_func
-            ):
-                each_func_info.import_name_list.add(import_info.import_name)
+        matching_imports = [
+            import_info.import_name
+            for import_info in self.ast_info.import_information.values()
+            if node_id in (
+                import_info.import_as,
+                import_info.from_import,
+                [import_info.import_name],
+                import_info.assign_targets_from_non_func
+            )
+        ]
 
-    def find_imports_in_expr_objs_from_non_func_objs(
+        func_info.imports.update(matching_imports)
+
+    def extract_imports_from_expression(
             self, expr_node: ast.Expr, non_func_obj: NonFunctionInfoClass
     ):
         """
         Find import in expr object in non-function object
         """
-        non_func_obj.non_func_object_type = "Expr"
-        non_func_obj.assign_targets = None
-
+        # Set the object type of the non-function object to "Expr"
+        non_func_obj.object_type = "Expr"
+        # Clear any previous assignment details
+        non_func_obj.assignments = None
+        # Traverse the expression node in search of 'ast.Name' child nodes
         for child in ast.walk(expr_node):
             if isinstance(child, ast.Name):
-                self.find_import_in_name_object(child, non_func_obj)
+                # Identify and store potential import names found in the child node
+                self.identify_imports_in_name(child, non_func_obj)
 
-    def find_imports_in_assign_objs_from_non_func_objs(
-            self,
-            assign_node: (ast.Assign, ast.AugAssign),
-            non_func_obj_info: NonFunctionInfoClass,
-    ):
+    def extract_imports_from_assignment(self, node: (ast.Assign, ast.AugAssign), info: NonFunctionInfoClass, ):
         """
-        Find import in assign object in non-function object
+        Extract import details from an assignment node that's outside any function.
         """
-        non_func_obj_info.non_func_object_type = "Assign"
-        assign_targets_list = get_assign_target_in_assign_objs(assign_node)
+        info.object_type = "Assign"
+        assignments = extract_assignment_targets(node)
 
-        if isinstance(assign_node.value, (ast.Call, ast.BinOp)):
-            logger.debug(non_func_obj_info)
-            for child in ast.walk(assign_node.value):
-                self.find_import_list_from_assign_target(
-                    child, assign_targets_list, non_func_obj_info
-                )
+        if isinstance(node.value, (ast.Call, ast.BinOp)):
+            for child in ast.walk(node.value):
+                self._identify_imports_in_assignment(child, assignments, info)
 
-        non_func_obj_info.assign_targets.extend(assign_targets_list)
+        info.assignments.extend(assignments)
 
     def iterate_module_and_analyze(self, module_node: ast.Module):
         """
-        Iterate over function and non-function and find expr_node and assign nodes
+         Description:
+        This method iterates over each child node of the provided AST module. Based on
+        the type of the node, it delegates the processing and analysis to specific handlers:
+
+        - If the node represents a function definition (`ast.FunctionDef`), it is sent
+          to the `process_function_nodes` method for further analysis specific to functions.
+
+        - Nodes representing module-level imports (`ast.ImportFrom`, `ast.Import`) and
+          conditional structures (`ast.If`) are processed using the `process_non_function_nodes` method.
+
+        - In case the node is an `ast.If` type, which potentially checks for the main
+          execution of a script (e.g., `if __name__ == "__main__":`), it is sent to the
+          `handle_if_statement` method for specialized handling.
         """
         for node in ast.iter_child_nodes(module_node):
             if isinstance(node, ast.FunctionDef):
-                self.function_object_handle(node)
-            elif isinstance(node, (ast.ImportFrom, ast.Import, ast.If)):
-                self.non_function_handle(node)
+                self.process_function_nodes(node)
+            elif isinstance(node, (ast.ImportFrom, ast.Import)):
+                self.process_non_function_nodes(node)
             elif isinstance(node, ast.If):
-                self.if_main_object_handle(node)
+                self.handle_if_statement(node)
 
-    def non_function_handle(self, node):
+    def process_non_function_nodes(self, node):
         """
         Save non_func_obj_info and find imports in objects
         """
-        non_func_obj = NonFunctionInfoClass(ast_object=node, line_number=node.lineno)
-        self.whole_ast_info.non_function_object_info[node] = non_func_obj
+        non_function_info = NonFunctionInfoClass(ast_object=node, line_number=node.lineno)
+        self.ast_info.non_function_object_info[node] = non_function_info
 
         if isinstance(node, (ast.Assign, ast.AugAssign)):
-            self.find_imports_in_assign_objs_from_non_func_objs(node, non_func_obj)
+            self.extract_imports_from_assignment(node, non_function_info)
         elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-            self.find_imports_in_expr_objs_from_non_func_objs(node, non_func_obj)
+            self.extract_imports_from_expression(node, non_function_info)
 
-    def function_object_handle(self, node: ast.FunctionDef) -> None:
+    def _process_child_node_tree(self, node, parent_function_node, each_func_info):
+        for child_node in ast.walk(node):
+            if isinstance(child_node, ast.Expr):
+                self.analyze_expression(child_node, parent_function_node, each_func_info)
+            elif isinstance(child_node, (ast.Assign, ast.AugAssign)):
+                self.analyze_assign_objects(child_node, parent_function_node, each_func_info)
+            elif isinstance(child_node, ast.Name):
+                self.identify_imports_in_name(child_node, each_func_info)
+
+    def _analyze_with_items(self, with_node, each_func_info):
+        for each_with_item in with_node.items:
+            if isinstance(each_with_item, ast.withitem):
+                call_obj_in_with = each_with_item.context_expr
+                self.find_imports_in_expression(call_obj_in_with, each_func_info)
+                self.identify_function_calls(call_obj_in_with, each_with_item, with_node)
+
+    def _handle_child_node(self, child, parent_function_node, each_func_info):
+        if isinstance(child, ast.Expr):
+            self.analyze_expression(child, parent_function_node, each_func_info)
+        elif isinstance(child, (ast.Assign, ast.AugAssign)):
+            self.analyze_assign_objects(child, parent_function_node, each_func_info)
+        elif isinstance(child, ast.With):
+            self._analyze_with_items(child, each_func_info)
+        else:
+            self._process_child_node_tree(child, parent_function_node, each_func_info)
+
+    def process_function_nodes(self, node: ast.FunctionDef) -> None:
         """
         Find expr and assign in function object and find import and function call
         """
-        func_dict = self.whole_ast_info.function_information
+        func_dict = self.ast_info.function_information
         each_func_info: FunctionDefinition = func_dict.get(node.name)
         get_parameters_and_return_objects(node, each_func_info)
 
         for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.Expr):
-                self.analyze_expr_objects(child, node, each_func_info)
-            elif isinstance(child, (ast.Assign, ast.AugAssign)):
-                self.analyze_assign_objects(child, node, each_func_info)
-            elif isinstance(child, ast.With):
-                for each_with_item in child.items:
-                    if isinstance(each_with_item, ast.withitem):
-                        call_obj_in_with = each_with_item.context_expr
-                        self.find_imports_in_expr_obj(call_obj_in_with, each_func_info)
-                        self.find_func_call_in_func_obj_expr(call_obj_in_with, child, node)
-            else:
-                for child_node in ast.walk(child):
-                    if isinstance(child_node, ast.Expr):
-                        self.analyze_expr_objects(child_node, node, each_func_info)
-                    elif isinstance(child_node, (ast.Assign, ast.AugAssign)):
-                        self.analyze_assign_objects(child_node, node, each_func_info)
-                    elif isinstance(child_node, ast.Name):
-                        self.find_import_in_name_object(child_node, each_func_info)
+            self._handle_child_node(child, node, each_func_info)
 
-    def if_main_object_handle(self, node):
+    def handle_if_statement(self, node):
         """
         Handle if __name__ == "__main__":
         """
         if isinstance(node.test, ast.Compare):
             non_func_obj = NonFunctionInfoClass(ast_object=node, line_number=node.lineno)
-            self.whole_ast_info.if_main_object = non_func_obj
+            self.ast_info.if_main_object = non_func_obj
 
             if isinstance(node.test.left, ast.Name) and node.test.left.id == "__name__":
                 for child_node in node.body:
@@ -1151,7 +1186,7 @@ class ImportAndFunctionAnalyzer(ast.NodeVisitor):
         Find function call of assign object inside if __name__ == "__main__"
         """
         non_func_obj = NonFunctionInfoClass(ast_object=child_node, line_number=child_node.lineno)
-        self.whole_ast_info.objects_inside_if_main[child_node] = non_func_obj
+        self.ast_info.objects_inside_if_main[child_node] = non_func_obj
 
         if isinstance(child_node.value, (ast.Call, ast.BinOp)):
             assign_node_value_obj = child_node.value
@@ -1159,7 +1194,7 @@ class ImportAndFunctionAnalyzer(ast.NodeVisitor):
             for assign_node_value_child in ast.walk(assign_node_value_obj):
                 if isinstance(assign_node_value_child, ast.Name):
                     name_id = assign_node_value_child.id
-                    func_list = list(self.whole_ast_info.function_information.keys())
+                    func_list = list(self.ast_info.function_information.keys())
                     if name_id in func_list:
                         func_call_info_class = FunctionCallInsideIfMain(
                             line_number=child_node.lineno,
@@ -1168,7 +1203,7 @@ class ImportAndFunctionAnalyzer(ast.NodeVisitor):
                             callee_object=assign_node_value_obj,
                             callee_object_name=name_id,
                         )
-                        self.whole_ast_info.function_call_inside_if_main.setdefault(child_node, []).append(
+                        self.ast_info.function_call_inside_if_main.setdefault(child_node, []).append(
                             func_call_info_class)
 
     def find_function_call_of_expr_obj_inside_if_main(self, child_node):
@@ -1176,12 +1211,12 @@ class ImportAndFunctionAnalyzer(ast.NodeVisitor):
         Find function call of expr object inside if __name__ == "__main__"
         """
         non_func_obj = NonFunctionInfoClass(ast_object=child_node, line_number=child_node.lineno)
-        self.whole_ast_info.objects_inside_if_main[child_node] = non_func_obj
+        self.ast_info.objects_inside_if_main[child_node] = non_func_obj
         expr_value = child_node.value
         for expr_value_child in ast.walk(expr_value):
             if isinstance(expr_value_child, ast.Name):
                 name_id = expr_value_child.id
-                func_list = list(self.whole_ast_info.function_information.keys())
+                func_list = list(self.ast_info.function_information.keys())
                 if name_id in func_list:
                     func_call_info_class = FunctionCallInsideIfMain(
                         line_number=child_node.lineno,
@@ -1190,53 +1225,42 @@ class ImportAndFunctionAnalyzer(ast.NodeVisitor):
                         callee_object=expr_value,
                         callee_object_name=name_id,
                     )
-                    self.whole_ast_info.function_call_inside_if_main.setdefault(child_node, []).append(
+                    self.ast_info.function_call_inside_if_main.setdefault(child_node, []).append(
                         func_call_info_class)
 
     def analyze_assign_objects(self, child, node, specific_func_dict):
         """
         handle assign object in function or non_func_obj
         """
-        target_list = get_assign_target_in_assign_objs(child)
-        self.find_import_in_func_obj_assign(child, target_list, specific_func_dict)
-        self.find_func_call_in_func_obj_assign(target_list, child, node)
+        target_list = extract_assignment_targets(child)
+        self.identify_imports_in_function_assignment(child, target_list, specific_func_dict)
+        self.find_function_calls_within_assignment(target_list, child, node)
 
-    def analyze_expr_objects(self, child, node, specific_func_dict):
+    def analyze_expression(self, expression_node: ast.Expr, parent_node: ast.AST, function_info) -> None:
         """
-        Handle expr object in function or non_func_obj
+        Analyze expression nodes to identify imports and function calls, excluding comments.
         """
+        if isinstance(expression_node.value, ast.Call):
+            self.find_imports_in_expression(expression_node.value, function_info)
+            self.identify_function_calls(expression_node.value, expression_node, parent_node)
 
-        # Expr Value Object
-        expr_value = child.value
-
-        # Exclude comments
-        if isinstance(expr_value, ast.Str):
-            pass
-
-        # Find imports and function calls
-        elif isinstance(expr_value, ast.Call):
-            self.find_imports_in_expr_objs(expr_value, specific_func_dict)
-            self.find_function_call_in_func_obj_expr(expr_value, child, node)
-
-    def add_boto3_and_json_module(self) -> None:
+    def ensure_imports_for_lambda(self, *modules: str) -> None:
         """
         Add boto3 and json imports for Lambda when the code doesn't have them
         """
-        import_name_list = list(self.whole_ast_info.import_information.keys())
+        existing_imports = set(self.ast_info.import_information.keys())
+        for module in modules:
+            if module not in existing_imports:
+                self.add_module_import(module)
 
-        if "boto3" not in import_name_list:
-            self.add_related_module("boto3")
-        if "json" not in import_name_list:
-            self.add_related_module("json")
-
-    def add_related_modules(self, name):
+    def add_module_import(self, module_name):
         """
         Add boto3 and json imports for Lambda when the code doesn't have them
         """
-        boto3_object = ast.Import(names=[ast.alias(name=name, asname=None)])
-        boto3_object = ast.fix_missing_locations(boto3_object)
-        boto3_info = Boto3AndJsonImportClass(ast_object=boto3_object)
-        self.whole_ast_info.boto3_and_json_imports[name] = boto3_info
+        import_node = ast.Import(names=[ast.alias(name=module_name, asname=None)])
+        import_node = ast.fix_missing_locations(import_node)
+        import_info = ModuleImportClass(ast_object=import_node)
+        self.ast_info.boto3_and_json_imports[module_name] = import_info
 
     def start_analyzing(self):
         """
@@ -1245,9 +1269,9 @@ class ImportAndFunctionAnalyzer(ast.NodeVisitor):
         Lastly add boto3 and json imports
         """
 
-        self.find_import_that_is_python_code(self.file_name)
+        self.find_imports_from_python_scripts(self.file_name)
         self.iterate_module_and_analyze(self.target_source_code)
-        self.add_boto3_and_json_module()
+        self.ensure_imports_for_lambda("boto3", "json")
 
 
 def get_parameters_and_return_objects(node, specific_func_dict):
@@ -1265,59 +1289,62 @@ def get_parameters_and_return_objects(node, specific_func_dict):
         for fieldname, VALUE in ast.iter_fields(obj)
         if fieldname == "arg"
     ]
-    specific_func_dict.function_parameters = function_parameters
+    specific_func_dict.parameters = function_parameters
 
     # last object
     last_object_in_function = node.body[-1]
     if isinstance(last_object_in_function, ast.Return):
 
-        specific_func_dict.return_object_ast = last_object_in_function
+        specific_func_dict.return_values_ast = last_object_in_function
 
         # when number of return object is more than 2
         if isinstance(last_object_in_function.value, ast.Tuple):
             return_objects = list(last_object_in_function.value.elts)
-            specific_func_dict.return_objects = return_objects
+            specific_func_dict.return_values = return_objects
 
         elif isinstance(last_object_in_function.value, ast.Name):
-            specific_func_dict.return_objects.append(last_object_in_function.value)
+            specific_func_dict.return_values.append(last_object_in_function.value)
 
 
-def get_assign_target_in_assign_objs(node: (ast.Assign, ast.AugAssign)):
+def _process_assign_targets(targets: List[ast.expr]) -> List[str]:
+    """
+    Process assignment targets for the ast.Assign node.
+    """
+    result = []
+    for target in targets:
+        if isinstance(target, ast.Tuple):
+            result.extend(el.id for el in target.elts if isinstance(el, ast.Name))
+        elif isinstance(target, ast.Subscript):
+            result.append(astor.to_source(target).strip())
+        elif isinstance(target, ast.Name):
+            result.append(target.id)
+    return result
+
+
+def _process_aug_assign_target(target: ast.expr) -> List[str]:
+    """
+    Process assignment target for the ast.AugAssign node.
+    """
+    if isinstance(target, ast.Tuple):
+        return [el.id for el in target.elts if isinstance(el, ast.Name)]
+    elif isinstance(target, ast.Name):
+        return [target.id]
+    return []
+
+
+def extract_assignment_targets(node: (ast.Assign, ast.AugAssign)):
     """
     Get Assign Target for example a = 3 -> get a,    b += 3 -> get b
     """
-    assign_targets_list = []
 
     if isinstance(node, ast.Assign):
-        for each_target in node.targets:
-
-            #  In case of tuple assignment e.g., a,b
-            if isinstance(each_target, ast.Tuple):
-                assign_targets_list.extend(
-                    each_element.id for each_element in each_target.elts
-                )
-            elif isinstance(each_target, ast.Subscript):
-                # TODO: current is astor.to_source() but there must be better
-                # ways
-                assign_targets_list.append(
-                    str(astor.to_source(each_target)).replace("\n", "")
-                )
-
-            else:
-                assign_targets_list.append(each_target.id)
-
+        return _process_assign_targets(node.targets)
     elif isinstance(node, ast.AugAssign):
-        if isinstance(node.target, ast.Tuple):
-            assign_targets_list.extend(
-                each_element.id for each_element in node.target.elts
-            )
-        else:
-            assign_targets_list.append(node.target.id)
-
-    return assign_targets_list
+        return _process_aug_assign_target(node.target)
+    return []
 
 
-def make_lambda_based_function(whole_ast_info: WholeASTInfoClass):
+def transform_to_lambda_functions(whole_ast_info: WholeASTInfoClass):
     """
     Make function lambda based on annotation information
     """
@@ -1325,33 +1352,31 @@ def make_lambda_based_function(whole_ast_info: WholeASTInfoClass):
 
     if whole_ast_info.offloading_whole_application:
         logger.info("[Offloading whole app]: Creating a single function")
-        make_lambda_for_main_function(whole_ast_info)
-    else:
-        function_information = whole_ast_info.function_information
-        sort_by_lambda_group = whole_ast_info.sort_by_lambda_group
-        lambda_number_idx = 1
+        convert_main_function_to_lambda(whole_ast_info)
 
-        for lambda_group, function_list in sort_by_lambda_group.items():
-            if lambda_group == "Default":
-                lambda_number_idx = make_lambda_func_for_default_group(
-                    function_information,
-                    function_list,
-                    lambda_number_idx,
-                    whole_ast_info,
-                )
-            else:
-                lambda_number_idx = make_lambda_func_for_lambda_group(
-                    function_information,
-                    function_list,
-                    lambda_number_idx,
-                    lambda_group,
-                    whole_ast_info,
-                )
+    function_information = whole_ast_info.function_information
+    sort_by_lambda_group = whole_ast_info.sort_by_lambda_group
+    lambda_counter = 1
 
-    return
+    for lambda_group, functions in sort_by_lambda_group.items():
+        if lambda_group == "Default":
+            lambda_counter = transform_default_group_to_lambda(
+                function_information,
+                functions,
+                lambda_counter,
+                whole_ast_info,
+            )
+        else:
+            lambda_counter = transform_group_to_lambda(
+                function_information,
+                functions,
+                lambda_counter,
+                lambda_group,
+                whole_ast_info,
+            )
 
 
-def make_lambda_func_for_default_group(
+def transform_default_group_to_lambda(
         function_information, function_list, lambda_number_idx, whole_ast_info
 ):
     """
@@ -1370,7 +1395,7 @@ def make_lambda_func_for_default_group(
         function_event_input_assign_list = []
         return_objects = []
 
-        for each_param in original_func_info.function_parameters:
+        for each_param in original_func_info.parameters:
             call_args = ast.Name(id=each_param, ctx=ast.Store())
             func_call_arguments_list.append(call_args)
 
@@ -1391,7 +1416,7 @@ def make_lambda_func_for_default_group(
             keywords=[],
         )
 
-        if original_func_info.return_objects:
+        if original_func_info.return_values:
             assign_target_obj = ast.Name(id="result", ctx=ast.Store())
             assign_ast = ast.Assign(targets=[assign_target_obj], value=value_obj)
             function_body.append(assign_ast)
@@ -1421,7 +1446,7 @@ def make_lambda_func_for_default_group(
             lambda_handler_func_object=lambda_handler,
             original_func_name=original_func_info.func_name,
             lambda_event_input_objs=function_event_input_assign_list,
-            input_parameter=original_func_info.function_parameters,
+            input_parameter=original_func_info.parameters,
             return_objects=return_objects,
         )
 
@@ -1434,7 +1459,7 @@ def make_lambda_func_for_default_group(
     return lambda_number_idx
 
 
-def make_lambda_func_for_lambda_group(
+def transform_group_to_lambda(
         function_information, function_list, lambda_number_idx, lambda_group, whole_ast_info
 ):
     """
@@ -1544,18 +1569,18 @@ def make_func_call_for_one_func_combination(
     test_obj = ast.Compare(left=left_obj, ops=ops_obj, comparators=comparators_obj)
 
     return_objs = []
-    if func_info.return_objects:
+    if func_info.return_values:
         return_obj = ast.Return(value=ast.Name(id="result", ctx=ast.Load()))
         return_objs.append(return_obj.value.id)
         if_statement_obj = ast.If(
             test=test_obj,
-            body=event_input_arg_obj_list + [func_info.func_call_for_lambda_handler] + [return_obj],
+            body=event_input_arg_obj_list + [func_info.lambda_handler_call] + [return_obj],
             orelse=[],
         )
     else:
         if_statement_obj = ast.If(
             test=test_obj,
-            body=event_input_arg_obj_list + [func_info.func_call_for_lambda_handler],
+            body=event_input_arg_obj_list + [func_info.lambda_handler_call],
             orelse=[],
         )
 
@@ -1581,7 +1606,7 @@ def make_func_call_for_multiple_funcs_combination(
 
     first_function_info = function_combination_list[0]
 
-    if isinstance(first_function_info.func_call_for_lambda_handler, ast.Assign):
+    if isinstance(first_function_info.lambda_handler_call, ast.Assign):
         lambda_event_input_list = []
         event_input_arg_obj_list = []
         for each_argument in lambda_event_inputs_per_function[first_function_info.func_name]:
@@ -1590,10 +1615,10 @@ def make_func_call_for_multiple_funcs_combination(
             event_input_arg_obj_list.append(assign_ast)
             lambda_event_input_list.append(name_ast)
 
-        assign_targets = first_function_info.func_call_for_lambda_handler.targets
+        assign_targets = first_function_info.lambda_handler_call.targets
 
         remaining_func_call_except_first = [
-            x.func_call_for_lambda_handler for x in function_combination_list[1:]
+            x.lambda_handler_call for x in function_combination_list[1:]
         ]
 
         copied_remaining_func_call_except_first = copy.deepcopy(
@@ -1609,13 +1634,13 @@ def make_func_call_for_multiple_funcs_combination(
 
         last_func_info = function_combination_list[-1]
         return_objs = []
-        if last_func_info.return_objects:
+        if last_func_info.return_values:
             return_obj = ast.Return(value=ast.Name(id="result", ctx=ast.Load()))
             return_objs.append(return_obj.value.id)
             if_statement_obj = ast.If(
                 test=test_obj,
                 body=event_input_arg_obj_list
-                     + [first_function_info.func_call_for_lambda_handler]
+                     + [first_function_info.lambda_handler_call]
                      + copied_remaining_func_call_except_first
                      + [return_obj],
                 orelse=[],
@@ -1624,7 +1649,7 @@ def make_func_call_for_multiple_funcs_combination(
             if_statement_obj = ast.If(
                 test=test_obj,
                 body=event_input_arg_obj_list
-                     + [first_function_info.func_call_for_lambda_handler]
+                     + [first_function_info.lambda_handler_call]
                      + copied_remaining_func_call_except_first,
                 orelse=[],
             )
@@ -1641,7 +1666,7 @@ def make_func_call_for_grouped_lambda_handler(func_info, lambda_event_inputs_per
     """
     func_call_arguments_list = []
 
-    for each_param in func_info.function_parameters:
+    for each_param in func_info.parameters:
         subscript_ast = ast.Subscript(
             value=ast.Subscript(
                 ast.Name(id="event", ctx=ast.Load()),
@@ -1661,13 +1686,13 @@ def make_func_call_for_grouped_lambda_handler(func_info, lambda_event_inputs_per
         args=func_call_arguments_list,
         keywords=[],
     )
-    if func_info.return_objects:
+    if func_info.return_values:
         assign_target_obj = ast.Name(id="result", ctx=ast.Store())
         assign_ast = ast.Assign(targets=[assign_target_obj], value=value_obj)
-        func_info.func_call_for_lambda_handler = assign_ast
+        func_info.lambda_handler_call = assign_ast
     else:
         expr_obj = ast.Expr(value=value_obj)
-        func_info.func_call_for_lambda_handler = expr_obj
+        func_info.lambda_handler_call = expr_obj
 
 
 def make_lambda_function_for_default_group(
@@ -1686,7 +1711,7 @@ def make_lambda_function_for_default_group(
     function_event_input_assign_list = []  # a, b, c
     return_objects = []  # return result
 
-    for each_param in original_func_info.function_parameters:
+    for each_param in original_func_info.parameters:
         # func_call(A,B) -> get A, B
         call_args = ast.Name(id=each_param, ctx=ast.Store())
         func_call_arguments_list.append(call_args)
@@ -1714,7 +1739,7 @@ def make_lambda_function_for_default_group(
     )
 
     # If return object exist
-    if original_func_info.return_objects:
+    if original_func_info.return_values:
 
         # Add assign object with main function callee
         assign_target_obj = ast.Name(id="result", ctx=ast.Store())
@@ -1751,7 +1776,7 @@ def make_lambda_function_for_default_group(
         lambda_handler_func_object=lambda_handler,
         original_func_name=original_func_info.func_name,
         lambda_event_input_objs=function_event_input_assign_list,
-        input_parameter=original_func_info.function_parameters,
+        input_parameter=original_func_info.parameters,
         return_objects=return_objects,
     )
     whole_ast_info.lambda_function_info[
@@ -1759,60 +1784,72 @@ def make_lambda_function_for_default_group(
     ] = compiler_generated_lambda_info
 
 
-def make_lambda_for_main_function(whole_ast_info: WholeASTInfoClass):
-    # Fetch main function definition
-    main_function_info = whole_ast_info.function_information.get("main")
+def _create_lambda_argument_assignments(main_function_info):
+    """
+    Create assignments and function call arguments for the lambda function based on main function parameters.
 
-    # Lambda function name with parameters
-    func_name = "lambda_handler_" + whole_ast_info.file_name.split(".")[0]
-    function_args = get_default_lambda_function_inputs()
+    Returns:
+    Tuple[List[ast.Name], List[ast.Assign]]
+    """
+    assignments = []
+    func_call_arguments = []
 
-    # Get arguments for function parameters with a = event['a']
-    func_call_arguments_list = []  # for main function callee
-    function_body = []  # for a = event['a]
-    function_event_input_assign_list = []
-    return_objects = []
-    for each_param in main_function_info.function_parameters:
-        call_args = ast.Name(id=each_param, ctx=ast.Store())
-
+    for each_param in main_function_info.parameters:
         subscript_ast = ast.Subscript(
             value=ast.Name(id="event", ctx=ast.Load()),
             slice=ast.Index(value=ast.Str(s=each_param)),
             ctx=ast.Load(),
         )
-
         name_ast = ast.Name(id=each_param, ctx=ast.Store())
-
         assign_ast = ast.Assign(targets=[name_ast], value=subscript_ast)
 
-        func_call_arguments_list.append(call_args)
+        func_call_arguments.append(name_ast)
+        assignments.append(assign_ast)
 
-        function_body.append(assign_ast)  # a = event['a']
-        function_event_input_assign_list.append(assign_ast)
+    return func_call_arguments, assignments
 
-    # Main function callee in lambda handler function
-    value_obj = ast.Call(
-        func=ast.Name(id=main_function_info.func_name, ctx=ast.Load()),
-        args=func_call_arguments_list,
-        keywords=[],
-    )
-    # If return object exist
-    if main_function_info.return_objects:
 
-        # Add assign object with main function callee
+def _handle_return_values(main_function_info, value_obj, assignments):
+    """
+    Handle return values of the main function for lambda conversion.
+
+    Returns:
+    Tuple[List[Union[ast.Assign, ast.Expr, ast.Return]], List[ast.Return]]
+    """
+    function_body = assignments.copy()
+    return_objects = []
+
+    if main_function_info.return_values:
         assign_target_obj = ast.Name(id="result", ctx=ast.Store())
         assign_ast = ast.Assign(targets=[assign_target_obj], value=value_obj)
-        function_body.append(assign_ast)
-
-        # Append return object
-        return_obj = ast.Return(value=ast.Name(id="result", ctx=ast.Load()))
-        function_body.append(return_obj)
-        return_objects.append(return_obj)
+        function_body.extend([assign_ast, ast.Return(value=ast.Name(id="result", ctx=ast.Load()))])
+        return_objects.append(assign_ast)
     else:
+        function_body.append(ast.Expr(value=value_obj))
 
-        # Just add function call with no assigned targets
-        expr_obj = ast.Expr(value=value_obj)
-        function_body.append(expr_obj)
+    return function_body, return_objects
+
+
+def convert_main_function_to_lambda(whole_ast_info: WholeASTInfoClass):
+    # Fetch main function definition
+    main_function_info = whole_ast_info.function_information.get("main")
+
+    # Generate the lambda function name
+    func_name = f"lambda_handler_{whole_ast_info.file_name.split('.')[0]}"
+    function_args = get_default_lambda_function_inputs()
+
+    # Extract arguments and create assignments based on the function parameters
+    func_call_arguments, assignments = _create_lambda_argument_assignments(main_function_info)
+
+    # Construct the function call for the main function inside the lambda handler
+    value_obj = ast.Call(
+        func=ast.Name(id=main_function_info.func_name, ctx=ast.Load()),
+        args=func_call_arguments,
+        keywords=[],
+    )
+
+    # Handle return values if any
+    function_body, return_objects = _handle_return_values(main_function_info, value_obj, assignments)
 
     # Create new lambda handler with main function callee_object
     lambda_handler = ast.FunctionDef(
@@ -1823,22 +1860,20 @@ def make_lambda_for_main_function(whole_ast_info: WholeASTInfoClass):
         returns=None,
     )
 
-    # Fetch module body and remove if main object
+    # Update the module body to incorporate the new lambda handler
     module_body = whole_ast_info.copied_module_for_analysis.body[:]
     module_body.remove(whole_ast_info.if_main_object.ast_object)
-
-    # Make new module with module body and new lambda handler
     lambda_module = ast.Module(body=module_body + [lambda_handler])
 
-    # Save it into whole_information
+    # Store the information related to the generated lambda
     compiler_generated_lambda_info = CompilerGeneratedLambda(
         lambda_name=func_name,
         original_ast_object=main_function_info.ast_object,
         lambda_module=lambda_module,
         lambda_handler_func_object=lambda_handler,
         original_func_name=main_function_info.func_name,
-        lambda_event_input_objs=function_event_input_assign_list,
-        input_parameter=main_function_info.function_parameters,
+        lambda_event_input_objs=assignments,
+        input_parameter=main_function_info.parameters,
         return_objects=return_objects,
     )
     whole_ast_info.module_info_for_offloading_whole_app = compiler_generated_lambda_info
@@ -1859,6 +1894,33 @@ def get_default_lambda_function_inputs():
     )
 
 
+def make_if_block_for_invoke_function() -> ast.If:
+    """
+    Construct the if block to determine the appropriate function invocation
+    based on the type of object.
+    """
+    invoke_for_assign = [
+        invoke_func_for_assign_obj(),
+        parse_result_from_lambda_result(),
+        download_output_to_vm(),
+        ast.Return(value=ast.Name(id="result", ctx=ast.Load())),
+    ]
+
+    invoke_for_expr = [invoke_func_for_expr_obj()]
+
+    return ast.If(
+        test=ast.Name(id="assign_obj", ctx=ast.Load()),
+        body=invoke_for_assign,
+        orelse=[
+            ast.If(
+                test=ast.Name(id="expr_obj", ctx=ast.Load()),
+                body=invoke_for_expr,
+                orelse=[],
+            ),
+        ],
+    )
+
+
 def make_orchestrator_function() -> ast.FunctionDef:
     """
     Make orchestrator function for invoking lambda function
@@ -1866,25 +1928,9 @@ def make_orchestrator_function() -> ast.FunctionDef:
     function_name = "invoke_function_using_lambda"
     function_args_field_obj = return_function_args_object()
     upload_input_obj = make_for_object_of_uploading_input_to_s3()
+    invoke_function_block = make_if_block_for_invoke_function()
 
-    invoke_function_and_download_output_to_vm = ast.If(
-        test=ast.Name(id="assign_obj", ctx=ast.Load()),
-        body=[
-            invoke_func_for_assign_obj(),
-            parse_result_from_lambda_result(),
-            download_output_to_vm(),
-            ast.Return(value=ast.Name(id="result", ctx=ast.Load())),
-        ],
-        orelse=[
-            ast.If(
-                test=ast.Name(id="expr_obj", ctx=ast.Load()),
-                body=[invoke_func_for_expr_obj()],
-                orelse=[],
-            ),
-        ],
-    )
-
-    function_body = [upload_input_obj, invoke_function_and_download_output_to_vm]
+    function_body = [upload_input_obj, invoke_function_block]
 
     return ast.FunctionDef(
         name=function_name,
@@ -2007,28 +2053,37 @@ def invoke_func_for_assign_obj():
     )
 
 
-def return_function_args_object():
-    function_parameters = [
-        ast.arg(arg="function_name", annotation=None),
-        ast.arg(arg="input_dict", annotation=None),
-        ast.arg(arg="assign_obj", annotation=None),
-        ast.arg(arg="expr_obj", annotation=None),
-        ast.arg(arg="input_to_s3", annotation=None),
-        ast.arg(arg="download_output_from_s3", annotation=None),
+def return_function_args_object() -> ast.arguments:
+    """
+    Return ast arguments object with specified function parameters and defaults.
+    """
+
+    # Define parameters without defaults
+    parameters_without_defaults = ["function_name", "input_dict"]
+
+    # Define parameters with defaults
+    parameters_with_defaults = [
+        "assign_obj",
+        "expr_obj",
+        "input_to_s3",
+        "download_output_from_s3",
     ]
-    function_parameters_default_value = [
-        ast.NameConstant(value=False),
-        ast.NameConstant(value=False),
-        ast.NameConstant(value=False),
-        ast.NameConstant(value=False),
-    ]
+
+    # Generate ast.arg objects for both lists
+    args_without_defaults = [ast.arg(arg=param, annotation=None) for param in parameters_without_defaults]
+    args_with_defaults = [ast.arg(arg=param, annotation=None) for param in parameters_with_defaults]
+
+    # Create a list of default values for args with defaults
+    default_values = [ast.NameConstant(value=False) for _ in parameters_with_defaults]
+
+    # Combine arguments and defaults to create the ast.arguments object
     return ast.arguments(
-        args=function_parameters,
+        args=args_without_defaults + args_with_defaults,
         vararg=None,
         kwonlyargs=[],
         kw_defaults=[],
         kwarg=None,
-        defaults=function_parameters_default_value,
+        defaults=default_values,
     )
 
 
@@ -2111,7 +2166,7 @@ def return_func_call_arguments(function_return_objects) -> List[ast.keyword]:
 def change_func_call_for_default_lambda_group(func_call_obj, func_call_obj_name, whole_ast_info):
     # Fetch function information
     function_info_class: FunctionDefinition = whole_ast_info.function_information[func_call_obj_name]
-    function_return_objects = function_info_class.return_objects
+    function_return_objects = function_info_class.return_values
 
     # Change function name to invoke_func_by_lambda
     # resize (a) -> invoke_function_using_lambda(a)
@@ -2130,9 +2185,7 @@ def change_func_call_for_default_lambda_group(func_call_obj, func_call_obj_name,
     logger.debug(astor.to_source(func_call_obj))
 
 
-def check_data_dependency(
-        copied_func_call: FunctionCallInfo, whole_ast_info: WholeASTInfoClass
-):
+def check_data_dependency(copied_func_call: FunctionCallInfo, whole_ast_info: WholeASTInfoClass):
     """
     For function call -> b
     a = b()
@@ -2141,7 +2194,6 @@ def check_data_dependency(
     """
 
     input_dependency(copied_func_call, whole_ast_info)
-
     output_dependency(copied_func_call, whole_ast_info)
 
 
@@ -2150,7 +2202,7 @@ def output_dependency(copied_func_call, whole_ast_info):
     For function call
     """
     callee_func_name: str = copied_func_call.caller_object_name
-    assign_node_target_list: list = copied_func_call.assign_targets
+    assign_node_target_list: list = copied_func_call.assigned_targets
     call_obj: ast.Call = copied_func_call.callee_object
 
     # Iterate function calls to find dependency
@@ -2171,6 +2223,26 @@ def output_dependency(copied_func_call, whole_ast_info):
                             each_keyword.value.value = True
 
 
+def should_update_input_to_s3(each_function_call, callee_func_name, call_func_parameters_name, call_obj):
+    """Determine if the input_to_s3 keyword should be updated."""
+    if callee_func_name != each_function_call.caller_object_name or each_function_call.object_type != "Assign":
+        return False
+
+    assign_targets = each_function_call.assigned_targets
+    if not set(assign_targets).intersection(set(call_func_parameters_name)):
+        return False
+
+    calling_obj_from_each_function_call = each_function_call.callee_object
+    return call_obj.lineno > calling_obj_from_each_function_call.lineno
+
+
+def update_keyword_value(call_obj, keyword_arg, value):
+    """Update a specific keyword's value in the given ast.Call object."""
+    for each_keyword in call_obj.keywords:
+        if each_keyword.arg == keyword_arg:
+            each_keyword.value.value = value
+
+
 def input_dependency(copied_func_call, whole_ast_info):
     """
     Input to S3 : True
@@ -2183,30 +2255,150 @@ def input_dependency(copied_func_call, whole_ast_info):
     call_obj: ast.Call = copied_func_call.callee_object
 
     for _, each_function_call in whole_ast_info.function_call_info_class.items():
-        if callee_func_name == each_function_call.caller_object_name and each_function_call.object_type == "Assign":
-            assign_targets = each_function_call.assign_targets
-
-            if set(assign_targets).intersection(set(call_func_parameters_name)):
-                calling_obj_from_each_function_call = each_function_call.callee_object
-
-                if call_obj.lineno > calling_obj_from_each_function_call.lineno:
-                    for each_keyword in call_obj.keywords:
-                        if each_keyword.arg == "input_to_s3":
-                            each_keyword.value.value = True
+        if should_update_input_to_s3(each_function_call, callee_func_name, call_func_parameters_name, call_obj):
+            update_keyword_value(call_obj, "input_to_s3", True)
 
 
 def function_call_orchestrator(whole_ast_info: WholeASTInfoClass) -> None:
     """
-    Make function call to lambda function call
+    Convert function calls to lambda function calls.
     """
-
     logger.info("Make function call orchestrator")
 
-    if whole_ast_info.offloading_whole_application:
-        logger.info("[Offloading whole app] : Skipping function_call_orchestrator")
-    else:
+    if not whole_ast_info.offloading_whole_application:
         orchestrate_function_call(whole_ast_info)
-    return
+    else:
+        logger.info("[Offloading whole app] : Skipping function_call_orchestrator")
+
+
+def get_func_call_of_lambda(func_call, function_of_lambda):
+    return sorted(
+        [func_call_val for func_call_val in func_call.values() if
+         func_call_val.callee_object_name in function_of_lambda],
+        key=lambda x: x.line_number
+    )
+
+
+def get_function_of_lambda(sort_by_lambda_group):
+    return [func for func_list in sort_by_lambda_group.values() for func in func_list]
+
+
+def group_by_lambda_calls(func_call_of_lambda, sort_by_lambda_group):
+    group_func_call = defaultdict(list)
+    for func_call_val in func_call_of_lambda:
+        for group_name, func_list in sort_by_lambda_group.items():
+            if func_call_val.callee_object_name in func_list:
+                group_func_call[group_name].append(func_call_val)
+    return group_func_call
+
+
+def orchestrate_default_group(each_func_call_info, whole_ast_info):
+    # Copy function_call_info_class. Need original later for dependency
+    copied_func_call = copy.deepcopy(each_func_call_info)
+    func_call_obj: ast.Call = copied_func_call.callee_object
+    func_call_obj_name = copied_func_call.callee_object_name
+
+    # Add it to whole_information
+    whole_ast_info.func_call_using_lambda.append(
+        LambdaBasedFunctionCallInfoClass(
+            copied_func_call_info=copied_func_call,
+            original_func_call_info=each_func_call_info,
+        )
+    )
+
+    change_func_call_for_default_lambda_group(func_call_obj, func_call_obj_name, whole_ast_info)
+    check_data_dependency(copied_func_call, whole_ast_info)
+
+
+def prepare_lambda_call_objects(first_func_call, func_name_list, function_info_class):
+    # Copy function_call_info_class. Need original later for dependency
+    copied_func_call = copy.deepcopy(first_func_call)
+    func_call_obj: ast.Call = copied_func_call.callee_object
+
+    # Change function name to invoke_func_by_lambda
+    func_call_obj.func = ast.Name(id="invoke_function_using_lambda", ctx=ast.Load())
+
+    function_parameters = [ast.Str(s=each_param) for each_param in function_info_class.parameters]
+
+    str_obj_of_call_func_params, name_obj_of_call_func_params = [], []
+    for each_argument in func_call_obj.args:
+        str_obj_of_call_func_params.append(each_argument.id)
+        name_obj_of_call_func_params.append(each_argument)
+
+    func_call_obj.args = [
+        ast.Str(s="_and_".join(func_name_list)),
+        ast.Dict(
+            keys=[ast.Str(s="func_with_params")],
+            values=[
+                ast.Dict(
+                    keys=[ast.Str(s="_and_".join(func_name_list))],
+                    values=[ast.Dict(keys=function_parameters, values=name_obj_of_call_func_params)]
+                )
+            ]
+        )
+    ]
+
+    func_call_obj.keywords = return_func_call_arguments(function_info_class.return_values)
+
+    return copied_func_call, func_call_obj
+
+
+def should_update_keyword(each_function_call, callee_func_name, assign_node_target_list, call_obj):
+    function_call_input_list = [i.id for i in each_function_call.call_func_params]
+    calling_obj_from_each_function_call = each_function_call.callee_object
+
+    conditions = [
+        callee_func_name == each_function_call.caller_object_name,
+        bool(set(assign_node_target_list).intersection(set(function_call_input_list))),
+        call_obj.lineno < calling_obj_from_each_function_call.lineno
+    ]
+
+    return all(conditions)
+
+
+def update_keyword_value(call_obj, keyword_arg, value):
+    for each_keyword in call_obj.keywords:
+        if each_keyword.arg == keyword_arg:
+            each_keyword.value.value = value
+
+
+def update_keywords_for_download(call_obj, callee_func_name, assign_node_target_list, function_call_info_class):
+    for _, each_function_call in function_call_info_class.items():
+        if should_update_keyword(each_function_call, callee_func_name, assign_node_target_list, call_obj):
+            update_keyword_value(call_obj, "download_output_from_s3", True)
+            break
+    else:
+        update_keyword_value(call_obj, "download_output_from_s3", False)
+
+
+def merge_function_calls(whole_ast_info, func_name_list, func_call_list, lambda_group):
+    logger.info("Merge Function Call")
+
+    first_func_call = func_call_list[0]
+    function_info_class: FunctionDefinition = whole_ast_info.function_information[first_func_call.callee_object_name]
+    copied_func_call, func_call_obj = prepare_lambda_call_objects(first_func_call, func_name_list, function_info_class)
+
+    first_lambda_info_for_function_call = LambdaBasedFunctionCallInfoClass(
+        copied_func_call_info=copied_func_call, original_func_call_info=first_func_call
+    )
+
+    last_func_call = func_call_list[-1]
+    copied_last_func_call = copy.deepcopy(last_func_call)
+    last_lambda_info_for_function_call = LambdaBasedFunctionCallInfoClass(
+        copied_func_call_info=None, original_func_call_info=last_func_call
+    )
+
+    lambda_info_list = [first_lambda_info_for_function_call, last_lambda_info_for_function_call]
+    whole_ast_info.combined_func_call_using_lambda[lambda_group] = lambda_info_list
+
+    input_dependency(copied_func_call, whole_ast_info)
+
+    callee_func_name: str = copied_last_func_call.caller_object_name
+    assign_node_target_list: list = copied_last_func_call.assigned_targets
+    call_obj: ast.Call = copied_func_call.callee_object
+
+    update_keywords_for_download(call_obj, callee_func_name, assign_node_target_list,
+                                 whole_ast_info.function_call_info_class)
 
 
 def orchestrate_function_call(whole_ast_info):
@@ -2216,19 +2408,10 @@ def orchestrate_function_call(whole_ast_info):
     function_information = whole_ast_info.function_information
     sort_by_lambda_group = whole_ast_info.sort_by_lambda_group
 
-    function_of_lambda = [func for func_list in sort_by_lambda_group.values() for func in func_list]
-
+    function_of_lambda = get_function_of_lambda(sort_by_lambda_group)
     func_call = whole_ast_info.function_call_info_class
-    func_call_of_lambda = [func_call_val for func_call_val in func_call.values() if
-                           func_call_val.callee_object_name in function_of_lambda]
-
-    func_call_of_lambda = sorted(func_call_of_lambda, key=lambda x: x.line_number)
-
-    group_func_call = defaultdict(list)
-    for func_call_val in func_call_of_lambda:
-        for group_name, func_list in sort_by_lambda_group.items():
-            if func_call_val.callee_object_name in func_list:
-                group_func_call[group_name].append(func_call_val)
+    func_call_of_lambda = get_func_call_of_lambda(func_call, function_of_lambda)
+    group_func_call = group_by_lambda_calls(func_call_of_lambda, sort_by_lambda_group)
 
     # Make lambda call orchestrator function
     if func_call_of_lambda:
@@ -2243,131 +2426,10 @@ def orchestrate_function_call(whole_ast_info):
     for lambda_group, func_call_list in group_func_call.items():
         if lambda_group == "Default":
             for each_func_call_info in func_call_list:
-                # Copy function_call_info_class. Need original later for dependency
-                copied_func_call = copy.deepcopy(each_func_call_info)
-                func_call_obj: ast.Call = copied_func_call.callee_object
-                func_call_obj_name = copied_func_call.callee_object_name
-
-                # Add it to whole_information
-                whole_ast_info.func_call_using_lambda.append(
-                    LambdaBasedFunctionCallInfoClass(
-                        copied_func_call_info=copied_func_call,
-                        original_func_call_info=each_func_call_info,
-                    )
-                )
-
-                change_func_call_for_default_lambda_group(
-                    func_call_obj, func_call_obj_name, whole_ast_info
-                )
-                check_data_dependency(copied_func_call, whole_ast_info)
+                orchestrate_default_group(each_func_call_info, whole_ast_info)
 
         else:
-            logger.debug("lambda_group")
-            logger.debug(sort_by_lambda_group.get(lambda_group))
-            logger.debug(func_call_list)
-            func_name_list = sort_by_lambda_group.get(lambda_group)
-            merge_func_call = all(
-                i.callee_object_name == j for i, j in zip(func_call_list, func_name_list)
-            )
-            if merge_func_call:
-                logger.info("Merge Function Call")
-
-                first_func_call = func_call_list[0]
-                # Copy function_call_info_class. Need original later for dependency
-                copied_func_call = copy.deepcopy(first_func_call)
-                func_call_obj: ast.Call = copied_func_call.callee_object
-                func_call_obj_name = copied_func_call.callee_object_name
-
-                first_lambda_info_for_function_call = LambdaBasedFunctionCallInfoClass(
-                    copied_func_call_info=copied_func_call,
-                    original_func_call_info=first_func_call,
-                )
-                lambda_info_list = [first_lambda_info_for_function_call]
-
-                function_info_class: FunctionDefinition = (
-                    whole_ast_info.function_information[func_call_obj_name]
-                )
-
-                function_parameters = function_info_class.function_parameters
-                function_parameters = [
-                    ast.Str(s=each_param) for each_param in function_parameters
-                ]
-                function_return_objects = function_info_class.return_objects
-
-                # Change function name to invoke_func_by_lambda
-                func_call_obj.func = ast.Name(
-                    id="invoke_function_using_lambda", ctx=ast.Load()
-                )
-
-                str_obj_of_call_func_params, name_obj_of_call_func_params = [], []
-                for each_argument in func_call_obj.args:
-                    str_obj_of_call_func_params.append(each_argument.id)
-                    name_obj_of_call_func_params.append(each_argument)
-
-                func_call_obj.args = [
-                    ast.Str(s="_and_".join(func_name_list)),
-                    ast.Dict(
-                        keys=[ast.Str(s="func_with_params")],
-                        values=[
-                            ast.Dict(
-                                keys=[ast.Str(s="_and_".join(func_name_list))],
-                                values=[
-                                    ast.Dict(
-                                        keys=function_parameters,
-                                        values=name_obj_of_call_func_params,
-                                    )
-                                ],
-                            ),
-                        ],
-                    ),
-                ]
-
-                func_call_obj.keywords = return_func_call_arguments(
-                    function_return_objects
-                )
-
-                last_func_call = func_call_list[-1]
-                copied_last_func_call = copy.deepcopy(last_func_call)
-                last_lambda_info_for_function_call = LambdaBasedFunctionCallInfoClass(
-                    copied_func_call_info=None,
-                    original_func_call_info=last_func_call,
-                )
-                lambda_info_list.append(last_lambda_info_for_function_call)
-
-                whole_ast_info.combined_func_call_using_lambda[
-                    lambda_group
-                ] = lambda_info_list
-
-                input_dependency(copied_func_call, whole_ast_info)
-
-                callee_func_name: str = copied_last_func_call.caller_object_name
-                assign_node_target_list: list = copied_last_func_call.assign_targets
-                call_obj: ast.Call = copied_func_call.callee_object
-
-                for _, each_function_call in whole_ast_info.function_call_info_class.items():
-                    function_call_input_list = [
-                        i.id for i in each_function_call.call_func_params
-                    ]
-
-                    calling_obj_from_each_function_call = each_function_call.callee_object
-
-                    if (
-                            callee_func_name == each_function_call.caller_object_name
-                            and set(assign_node_target_list).intersection(
-                        set(function_call_input_list)
-                    )
-                            and call_obj.lineno < calling_obj_from_each_function_call.lineno
-                    ):
-                        for each_keyword in call_obj.keywords:
-                            if each_keyword.arg == "download_output_from_s3":
-                                each_keyword.value.value = True
-
-                for each_keyword in call_obj.keywords:
-                    if each_keyword.arg == "download_output_from_s3":
-                        each_keyword.value.value = False
-
-                logger.debug(astor.to_source(func_call_obj))
-                logger.debug(astor.to_source(whole_ast_info.lambda_invoke_function))
+            merge_function_calls(whole_ast_info, sorted_func_name_list, func_call_list, lambda_group)
 
 
 def make_function_orchestrator_func(whole_ast_info):
@@ -2443,7 +2505,7 @@ def make_obj_for_downloading_from_s3(input_param_list):
 
 def add_using_s3_in_lambda_handler(whole_ast_info: WholeASTInfoClass) -> None:
     """
-    Add downloading input from s3 in lambda handler depending on input
+    Add downloading input from s3 in lambda handler depending on input.
     e.g., put s3_client.download()
     """
 
@@ -2453,16 +2515,22 @@ def add_using_s3_in_lambda_handler(whole_ast_info: WholeASTInfoClass) -> None:
         process_offloading_whole_app_lambda(whole_ast_info)
         return
 
+    process_each_compiler_generated_lambda(whole_ast_info)
 
-    else:
-        func_name_to_function_info_class_dict = whole_ast_info.function_information
-        lambda_function_info = whole_ast_info.lambda_function_info
 
-        for _, each_compiler_generated_lambda in lambda_function_info.items():
-            if isinstance(each_compiler_generated_lambda, CompilerGeneratedLambda):
-                process_compiler_generated_lambda(each_compiler_generated_lambda, func_name_to_function_info_class_dict)
-            elif isinstance(each_compiler_generated_lambda, MergedCompilerGeneratedLambda):
-                process_merged_compiler_generated_lambda(each_compiler_generated_lambda)
+def process_each_compiler_generated_lambda(whole_ast_info: WholeASTInfoClass) -> None:
+    """
+    Process each compiler-generated lambda based on its type.
+    """
+
+    func_name_to_function_info_class_dict = whole_ast_info.function_information
+    lambda_function_info = whole_ast_info.lambda_function_info
+
+    for _, each_compiler_generated_lambda in lambda_function_info.items():
+        if isinstance(each_compiler_generated_lambda, CompilerGeneratedLambda):
+            process_compiler_generated_lambda(each_compiler_generated_lambda, func_name_to_function_info_class_dict)
+        elif isinstance(each_compiler_generated_lambda, MergedCompilerGeneratedLambda):
+            process_merged_compiler_generated_lambda(each_compiler_generated_lambda)
 
 
 def process_offloading_whole_app_lambda(whole_ast_info):
@@ -2501,59 +2569,62 @@ def handle_boto3_import(lambda_module, whole_ast_info, import_name_list, lambda_
     logger.info("Add S3 client")
     add_s3_client_in_lambda_module(lambda_module, whole_ast_info)
     import_name_list.append("boto3")
-    lambda_module_for_whole.import_name_list = import_name_list
+    lambda_module_for_whole.imports = import_name_list
 
 
 def process_compiler_generated_lambda(each_compiler_generated_lambda, func_name_to_function_info_class_dict):
     """
-    Process compiler generated lambda
+    Process compiler generated lambda.
     """
     original_func_name = each_compiler_generated_lambda.original_func_name
-    original_func_info: FunctionDefinition = func_name_to_function_info_class_dict.get(original_func_name)
+    original_func_info = func_name_to_function_info_class_dict.get(original_func_name)
     lambda_func_object = each_compiler_generated_lambda.lambda_handler_func_object
 
-    object_for_downloading_input = make_obj_for_downloading_from_s3(original_func_info.function_parameters)
-    event_input_obj_list = each_compiler_generated_lambda.lambda_event_input_objs
-    last_event_input_obj_index = lambda_func_object.body.index(event_input_obj_list[-1]) + 1
+    insert_objects_for_downloading_input(lambda_func_object,
+                                         original_func_info.parameters,
+                                         each_compiler_generated_lambda.lambda_event_input_objs)
 
-    for idx, each_object_for_downloading_input in enumerate(object_for_downloading_input):
-        lambda_func_object.body.insert(idx + last_event_input_obj_index, each_object_for_downloading_input)
-
-    if return_objects := original_func_info.return_objects:
+    if return_objects := original_func_info.return_values:
         put_return_objs_for_s3(lambda_func_object, return_objects)
 
 
 def process_merged_compiler_generated_lambda(each_compiler_generated_lambda):
     """
-    Process merged compiler generated lambda
+    Process merged compiler generated lambda.
     """
     lambda_func_object = each_compiler_generated_lambda.lambda_handler_func_object
-    lambda_event_input_objs = each_compiler_generated_lambda.lambda_event_input_objs
-    lambda_input_per_if_statement = each_compiler_generated_lambda.lambda_input_per_if_statement
 
     for each_ast in lambda_func_object.body:
         if isinstance(each_ast, ast.If):
-            input_arguments = lambda_input_per_if_statement.get(each_ast)
-            object_for_downloading_input = make_obj_for_downloading_from_s3(input_arguments)
+            input_arguments = each_compiler_generated_lambda.lambda_input_per_if_statement.get(each_ast)
             event_input_obj_list = each_compiler_generated_lambda.parse_input_per_if_statement.get(each_ast)
-            last_event_input_obj_index = each_ast.body.index(event_input_obj_list[-1]) + 1
 
-            for idx, each_object_for_downloading_input in enumerate(object_for_downloading_input):
-                each_ast.body.insert(idx + last_event_input_obj_index, each_object_for_downloading_input)
+            insert_objects_for_downloading_input(each_ast,
+                                                 input_arguments,
+                                                 event_input_obj_list)
 
             if return_objects := each_compiler_generated_lambda.return_obj_per_if_statement.get(each_ast):
                 put_return_objs_for_s3(each_ast, return_objects)
+
+
+def insert_objects_for_downloading_input(lambda_func_object, input_parameters, event_input_objs):
+    """
+    Inserts objects for downloading from S3 into the lambda function object.
+    """
+    object_for_downloading_input = make_obj_for_downloading_from_s3(input_parameters)
+    last_event_input_obj_index = lambda_func_object.body.index(event_input_objs[-1]) + 1
+
+    for idx, each_object_for_downloading_input in enumerate(object_for_downloading_input):
+        lambda_func_object.body.insert(idx + last_event_input_obj_index, each_object_for_downloading_input)
 
 
 def add_upload_to_s3_for_return_object(lambda_func_object, lambda_module_for_whole):
     """
     Add upload to s3 for return object
     """
-    if lambda_module_for_whole.return_objects:
+    if lambda_module_for_whole.return_values:
         logger.info("Handling return objects")
-        put_return_objs_for_s3(
-            lambda_func_object, lambda_module_for_whole.return_objects
-        )
+        put_return_objs_for_s3(lambda_func_object, lambda_module_for_whole.return_values)
 
 
 def add_s3_client_in_lambda_module(lambda_module, whole_ast_info):
@@ -2656,36 +2727,40 @@ def make_module_for_lambda_handler(whole_ast_info: WholeASTInfoClass) -> None:
 
 def make_lambda_handler_modules(whole_ast_info):
     """
-    Make lambda handler modules
+    Make lambda handler modules by setting up necessary imports and merging different parts of the code
+    to form the complete lambda function.
     """
+
+    # Fetch information from the whole_ast_info object
     import_info_dict_name_to_class = whole_ast_info.import_information
     non_func_obj_info = whole_ast_info.non_function_object_info
     func_name_to_function_info_class_dict = whole_ast_info.function_information
     lambda_handlers_info = whole_ast_info.lambda_function_info
 
-    # Add import_ast_object and import name list from non-func object
-    non_func_import_name_list, non_func_ast_list, = set(), []
-
-    non_func_info: NonFunctionInfoClass
+    # Extract import information and AST objects from non-function objects
+    non_func_import_name_list, non_func_ast_list = set(), []
     for non_func_ast, non_func_info in non_func_obj_info.items():
-        non_func_import_name_list.update(non_func_info.import_name_list)
+        non_func_import_name_list.update(non_func_info.imports)
         non_func_ast_list.append(non_func_ast)
 
+    # Create an S3 client object, likely for use within the lambda
     s3_client_object = make_s3_client()
 
-    # Iterate through lambda_handlers_info
+    # Iterate through all lambda handlers and set up necessary imports, modules, and other components
     for l_group_name, each_lambda_handler in lambda_handlers_info.items():
         if l_group_name != "Default":
             import_objects_list = []
             import_name_list = []
             import_info_dict = defaultdict()
 
+            # Accumulate all the imports from the function definitions that are part of the lambda
             function_name_list = each_lambda_handler.lambda_name_list
             for each_function in function_name_list:
                 original_func_name_info = func_name_to_function_info_class_dict.get(each_function)
-                import_name_list.extend(original_func_name_info.import_name_list)
+                import_name_list.extend(original_func_name_info.imports)
                 import_name_list.extend(non_func_import_name_list)
 
+            # Gather the AST objects for all the imports
             for each_import_name in import_name_list:
                 if each_import_name != "boto3":
                     import_info = import_info_dict_name_to_class.get(each_import_name)
@@ -2693,24 +2768,28 @@ def make_lambda_handler_modules(whole_ast_info):
                     import_info_dict[each_import_name] = import_ast_object
                     import_objects_list.append(import_ast_object)
 
+            # If boto3 is not already in the list, add it
             if "boto3" not in import_name_list:
                 boto3_info = whole_ast_info.boto3_and_json_imports["boto3"]
                 import_objects_list.append(boto3_info.ast_object)
                 non_func_ast_list.append(s3_client_object)
 
+            # Removing duplicate imports and AST objects
             new_import_objects_list = list(set(import_objects_list))
             new_non_func_ast_list = list(set(non_func_ast_list))
 
+            # Update the lambda handler object with the new imports and structure
             each_lambda_handler.import_info_dict = import_info_dict
             each_lambda_handler.lambda_module.body = (
                     new_import_objects_list + new_non_func_ast_list + each_lambda_handler.lambda_module.body
             )
 
+            # Logging for debugging purposes
             logger.info(astor.to_source(each_lambda_handler.lambda_module))
             logger.debug(each_lambda_handler.lambda_group_name)
 
-            each_lambda_handler.import_name_list = new_import_objects_list
-
+            # Update imports and add the completed module to the whole AST info
+            each_lambda_handler.imports = new_import_objects_list
             whole_ast_info.lambda_handler_module_dict[
                 each_lambda_handler.lambda_group_name] = each_lambda_handler.lambda_module
 
@@ -2740,109 +2819,116 @@ def make_s3_client():
 
 def make_lambda_code_directory(whole_ast_info: WholeASTInfoClass) -> None:
     """
-    each directory will have each lambda_handler
+    Create a directory structure for lambda functions. Each directory will have its respective lambda handler.
     """
-
-    logger.info("Make directory for lambda functions")
-
-    # Fetch lambda dir where each lambda handler is used
     lambda_code_path = "./lambda_path"
+    logger.info("Make directory for lambda functions")
 
     if whole_ast_info.offloading_whole_application:
         logger.info("[Offloading whole app] : Make only one directory")
+        return
 
-    else:
-        # Make Folder for lambda codes
-        if os.path.exists(lambda_code_path):
-            logger.info(f"Empty {lambda_code_path}")
-            shutil.rmtree(lambda_code_path)
-        os.makedirs(lambda_code_path)
+    _initialize_lambda_directory(lambda_code_path)
 
-        # Fetch lambda info dictionary
-        lambda_info_dict = whole_ast_info.lambda_function_info
+    lambda_info_dict = whole_ast_info.lambda_function_info
+    _handle_lambda_information(lambda_code_path, lambda_info_dict)
 
-        for lambda_name, lambda_info in lambda_info_dict.items():
-            if isinstance(lambda_info, MergedCompilerGeneratedLambda):
-                # Fetch lambda module object
-                lambda_module_obj = lambda_info.lambda_module
-
-                # Combine lambda name with lambda code path and make subdirectory
-                sub_dir = os.path.join(lambda_code_path, lambda_name)
-                os.makedirs(sub_dir)
-
-                # Make source code
-                native_code = astor.to_source(lambda_module_obj)
-
-                # Write code to sub_dir
-                with open(os.path.join(sub_dir, f"{lambda_name}.py"), "w") as temp_file:
-                    temp_file.write(native_code)
-
-    # Fetch module from making directory
     lambda_handler_module_dict: Dict[str, ast.Module] = whole_ast_info.lambda_handler_module_dict
 
     if not lambda_handler_module_dict:
-        if os.path.exists(lambda_code_path):
-            shutil.rmtree(lambda_code_path)
         return
 
-    # find if there output/lambda_codes. Remove if already exist or make directory
+    _handle_lambda_handler_modules(lambda_code_path, lambda_handler_module_dict)
+
+
+def _initialize_lambda_directory(lambda_code_path: str) -> None:
+    """
+    Initialize a directory for lambda codes. If it exists, clean it. Otherwise, create it.
+    """
     if os.path.exists(lambda_code_path):
+        logger.info(f"Empty {lambda_code_path}")
         shutil.rmtree(lambda_code_path)
     os.makedirs(lambda_code_path)
 
+
+def _handle_lambda_information(lambda_code_path: str, lambda_info_dict: Dict[str, Any]) -> None:
+    """
+    Handle the generation of directories and files for each lambda information.
+    """
+    for lambda_name, lambda_info in lambda_info_dict.items():
+        if isinstance(lambda_info, MergedCompilerGeneratedLambda):
+            lambda_module_obj = lambda_info.lambda_module
+            _generate_lambda_directory_and_file(lambda_code_path, lambda_name, lambda_module_obj)
+
+
+def _handle_lambda_handler_modules(lambda_code_path: str, lambda_handler_module_dict: Dict[str, ast.Module]) -> None:
+    """
+    Handle the generation of directories and files for each lambda handler module.
+    """
     for lambda_handler_name, lambda_handler_module in lambda_handler_module_dict.items():
-        # Make sub_directory for each module e.g., lambda code/lambda_handler_1
-        sub_dir = os.path.join(lambda_code_path, lambda_handler_name)
-        os.makedirs(sub_dir)
+        _generate_lambda_directory_and_file(lambda_code_path, lambda_handler_name, lambda_handler_module)
 
-        # Use astor.to_source() to make readable code
-        native_code = astor.to_source(lambda_handler_module)
 
-        # Write code to sub_dir
-        with open(os.path.join(sub_dir, f"{lambda_handler_name}.py"), "w") as temp_file:
-            temp_file.write(native_code)
+def _generate_lambda_directory_and_file(lambda_code_path: str, lambda_name: str, module_obj: Any) -> None:
+    """
+    Generate a directory and a file for a given lambda name and module object.
+    """
+    sub_dir = os.path.join(lambda_code_path, lambda_name)
+    os.makedirs(sub_dir)
+
+    native_code = astor.to_source(module_obj)
+
+    with open(os.path.join(sub_dir, f"{lambda_name}.py"), "w") as temp_file:
+        temp_file.write(native_code)
 
 
 def insert_imports_in_lambda_code_folder(whole_ast_info: WholeASTInfoClass) -> None:
     """
-    Insert module(import) for each lambda handler in each directory
+    Insert module(import) for each lambda handler in each directory.
+    This function ensures that the necessary import modules are present in the lambda code directory.
     """
 
     logger.info("Link library modules for lambda handlers")
 
     if whole_ast_info.offloading_whole_application:
         offload_whole_application(whole_ast_info)
-    else:
-        # Fetch import modules in directory
-        import_modules_dir, module_lists = bring_module_list_in_import_modules_folder()
+        return
 
-        lambda_code_path = "./lambda_path"
+    # Fetch the list of import modules present in the directory
+    import_modules_dir, module_lists = bring_module_list_in_import_modules_folder()
 
-        lambda_info_dict = whole_ast_info.lambda_function_info
+    # Define the base path where lambda codes are located
+    lambda_code_path = "./lambda_path"
+    lambda_info_dict = whole_ast_info.lambda_function_info
 
-        for lambda_name, lambda_info in lambda_info_dict.items():
-            if isinstance(lambda_info, MergedCompilerGeneratedLambda):
-                # Combine lambda dir with lambda name
-                lambda_dir = os.path.join(lambda_code_path, lambda_info.lambda_group_name)
-                # Fetch all import modules used in this source code
-                import_list = lambda_info.import_name_list
+    # Iterate through each lambda handler and add necessary import modules
+    for lambda_name, lambda_info in lambda_info_dict.items():
+        if not isinstance(lambda_info, MergedCompilerGeneratedLambda):
+            continue
 
-                # In case of library dependency e.g., mxnet, matplotlib
-                consider_dependency_between_modules(import_list)
+        # Identify the directory specific to the lambda handler
+        lambda_dir = os.path.join(lambda_code_path, lambda_info.lambda_group_name)
 
-                # Group import name depending on python script or not
-                import_group_by_python_script = group_import_by_from_script(whole_ast_info)
+        # Retrieve the list of imports used within the lambda handler
+        import_list = lambda_info.import_name_list
 
-                module_list = list(import_group_by_python_script.values())[0]
-                logger.info(f"Import modules : {module_list}")
+        # Handle library dependencies, if any (e.g., mxnet, matplotlib)
+        consider_dependency_between_modules(import_list)
 
-                # Iterate each import name in source code
-                iterate_and_put_import_modules(
-                    import_group_by_python_script,
-                    import_modules_dir,
-                    lambda_dir,
-                    module_lists,
-                )
+        # Group the imports based on whether they are Python scripts or not
+        import_group_by_python_script = group_import_by_from_script(whole_ast_info)
+
+        # Log the grouped imports
+        module_list = list(import_group_by_python_script.values())[0]
+        logger.info(f"Import modules : {module_list}")
+
+        # For each import, ensure it's present within the lambda directory
+        iterate_and_put_import_modules(
+            import_group_by_python_script,
+            import_modules_dir,
+            lambda_dir,
+            module_lists
+        )
 
 
 def offload_whole_application(whole_ast_info):
@@ -2861,7 +2947,7 @@ def offload_whole_application(whole_ast_info):
     lambda_dir = os.path.join("./lambda_path", module_to_offload.lambda_name)
 
     # Fetch all import modules used in this source code
-    import_list = module_to_offload.import_name_list
+    import_list = module_to_offload.imports
 
     # In case of library dependency e.g., mxnet, matplotlib
     consider_dependency_between_modules(import_list)
@@ -2907,15 +2993,20 @@ def group_import_by_from_script(whole_ast_info):
     return dict(lambda_dict_for_python_script)
 
 
-def consider_dependency_between_modules(import_list):
+def consider_dependency_between_modules(import_list) -> None:
     """
-    Consider dependency between modules
+    Adjusts the import_list based on module dependencies.
+
+    Args:
+        import_list (set): A set of module names.
     """
+
+    # Remove dependencies if 'matplotlib' is in the list
     if "matplotlib" in import_list:
         import_list.discard("matplotlib")
         import_list.discard("numpy")
 
-    # MxNet
+    # Add dependencies if 'mxnet' is in the list
     if "mxnet" in import_list:
         import_list.update(["requests", "urllib3", "chardet"])
 
@@ -2924,7 +3015,7 @@ def bring_module_list_in_import_modules_folder():
     """
     Bring module list in import_modules folder
     """
-    import_modules_dir = "./compiler_module_config.module_dir"
+    import_modules_dir = "../Workload/MediaReservation"
     module_lists = next(os.walk(os.path.join(os.getcwd(), import_modules_dir)))[1]
     return import_modules_dir, module_lists
 
@@ -2970,10 +3061,10 @@ def create_lambda_function_by_cli(lambda_deploy_info, whole_info):
             },
             FunctionName=function_name,
             Handler=f"{handler_name}_{function_name}.{handler_name}_{function_name}",
-            MemorySize=lambda_deploy_info.memory_size,
+            MemorySize=lambda_deploy_info.memory,
             Publish=True,
             Role=lambda_deploy_info.aws_role,
-            Runtime=lambda_deploy_info.runtime,
+            Runtime=lambda_deploy_info.runtime_version,
             Timeout=lambda_deploy_info.time_out,
         )
 
@@ -2986,10 +3077,10 @@ def create_lambda_function_by_cli(lambda_deploy_info, whole_info):
             },
             FunctionName=function_name,
             Handler=f"{handler_name}.{handler_name}",
-            MemorySize=lambda_deploy_info.memory_size,
+            MemorySize=lambda_deploy_info.memory,
             Publish=True,
             Role=lambda_deploy_info.aws_role,
-            Runtime=lambda_deploy_info.runtime,
+            Runtime=lambda_deploy_info.runtime_version,
             Timeout=lambda_deploy_info.time_out,
         )
 
@@ -3204,14 +3295,14 @@ def write_hybrid_code(whole_ast_info: WholeASTInfoClass):
         non_func_info[lambda_client_object] = NonFunctionInfoClass(
             last_non_func_obj.lineno + 1,
             ast_object=lambda_client_object,
-            non_func_object_type="Assign",
+            object_type="Assign",
             description="lambda_client object",
         )
 
         non_func_info[s3_client_object] = NonFunctionInfoClass(
             last_non_func_obj.lineno + 1,
             ast_object=s3_client_object,
-            non_func_object_type="Assign",
+            object_type="Assign",
             description="s3_client_object",
         )
 
@@ -3393,14 +3484,14 @@ def make_lambda_function_using_aws_cli(whole_ast_info: WholeASTInfoClass):
         logger.debug(original_file_name)
 
         try:
-            lambda_name = whole_ast_info.lambda_config_for_whole_application.function_name
+            lambda_name = whole_ast_info.lambda_config_for_whole_application.func_name
         except AttributeError:
             lambda_name = original_file_name_without_extension
             logger.info(f"Using file name to {lambda_name}")
 
         lambda_handler_name = "lambda_handler"
         lambda_zip_name = f"{lambda_handler_name}.zip"
-        lambda_arn = f"arn:aws:lambda:us-east-1:206135129663:function:{lambda_name}"
+        lambda_arn = f"arn:aws:lambda:us-east-1:xxxx:function:{lambda_name}"
 
         lambda_deploy_info = LambdaDeployInfo(
             original_func_name=original_file_name,
@@ -3529,34 +3620,37 @@ def upload_deploy_zip_to_s3(bucket_name, deploy_directory, deploy_zip, whole_ast
     else:
         whole_ast_info.lambda_deployment_zip_info[deploy_zip.split(".")[0]] = random_named_lambda_deploy_zip
 
+    # TODO: The actual S3 uploading logic
 
-def group_by_lambda_group_name(whole_info: WholeASTInfoClass):
+
+def group_functions_by_lambda_group(ast_info: WholeASTInfoClass):
     """
     Group function information based on lambda group name
     """
-    logger.info("Grouping by lambda group name")
+    logger.info("Grouping functions by lambda group name.")
 
-    if whole_info.offloading_whole_application:
-        logger.info("\tSkip since offloading whole app")
+    # If offloading the whole application, there's no need to proceed with grouping.
+    if ast_info.offloading_whole_application:
+        logger.info("\tSkipping: offloading the entire application.")
+        return
+
+    # Extract function information
+    functions = ast_info.function_information.values()
+
+    # Group functions by lambda group name
+    grouped_by_lambda = defaultdict(list)
+    for function in functions:
+        if function.func_name != "main" and function.initial_pragma == "FaaS":
+            grouped_by_lambda[function.lambda_group_name].append(function.func_name)
+
+    # Update the ast_info object with the grouped functions
+    ast_info.sort_by_lambda_group = dict(grouped_by_lambda)
+
+    # Logging grouped information
+    if grouped_by_lambda:
+        logger.info(f"\tGrouped by lambda: {grouped_by_lambda}")
     else:
-        # Fetch function information
-        fun_info = list(whole_info.function_information.values())
-
-        # Group func info based on lambda group name
-        group_lambda_dict = defaultdict(list)
-
-        for x in fun_info:
-            # Functions that are not "main" and have initial_pragma as "FaaS" are grouped by lambda group name
-            if x.func_name != "main" and x.initial_pragma == "FaaS":
-                group_lambda_dict["".join(x.lambda_group_name)].append(x.func_name)
-
-        # Save the grouped information to whole_info
-        whole_info.sort_by_lambda_group = dict(group_lambda_dict)
-
-        if group_lambda_dict:
-            logger.info(f"\tGroup by lambda: {dict(group_lambda_dict)}")
-        else:
-            logger.info("\tThere is no lambda group")
+        logger.info("\tNo lambda groups found.")
 
 
 def process_compiler(original_code, f_name):
@@ -3567,60 +3661,61 @@ def process_compiler(original_code, f_name):
     """
 
     # Create dataclass to store whole info
-    whole_info = make_dataclass_that_contains_whole_info(original_code, f_name)
+    ast_info = generate_original_and_copied_ast_info(original_code, f_name)
 
     # Copy module for analysis
-    copied_module: ast.Module = whole_info.copied_module_for_analysis
+    analyzed_ast_module: ast.Module = ast_info.copied_module_for_analysis
 
     # Find user annotations in the code
-    find_user_annotation_in_code(whole_info)
+    extract_user_annotations(ast_info)
 
     # Sort and group functions by lambda group name
-    group_by_lambda_group_name(whole_info)
+    group_functions_by_lambda_group(ast_info)
 
     # Analyze imports and functions
-    code_analyzer = ImportAndFunctionAnalyzer(whole_info, compiler_module_config)
-    code_analyzer.visit(copied_module)
+    compiler_module_config = ModuleConfigClass(f_name)
+    code_analyzer = ImportAndFunctionAnalyzer(ast_info, compiler_module_config)
+    code_analyzer.visit(analyzed_ast_module)
     code_analyzer.start_analyzing()
 
     # Change function definitions to lambda functions
-    make_lambda_based_function(whole_info)
+    transform_to_lambda_functions(ast_info)
 
     # Function call orchestrator and change function call
-    function_call_orchestrator(whole_info)
+    function_call_orchestrator(ast_info)
 
     # Add modules for s3 in lambda handler
-    add_using_s3_in_lambda_handler(whole_info)
+    add_using_s3_in_lambda_handler(ast_info)
 
     # Add modules for lambda handler
-    make_module_for_lambda_handler(whole_info)
+    make_module_for_lambda_handler(ast_info)
 
     # Make directory for each lambda handler
-    make_lambda_code_directory(whole_info)
+    make_lambda_code_directory(ast_info)
 
     # Put library modules in each lambda handler
-    insert_imports_in_lambda_code_folder(whole_info)
+    insert_imports_in_lambda_code_folder(ast_info)
 
     # Zip library modules and code for deployment
-    make_zip_file_for_lambda_handler(whole_info)
+    make_zip_file_for_lambda_handler(ast_info)
 
     # Upload deployment list to s3
-    upload_lambda_deployment_to_s3(whole_info)
+    upload_lambda_deployment_to_s3(ast_info)
 
     # Create lambda function using aws cli
-    make_lambda_function_using_aws_cli(whole_info)
+    make_lambda_function_using_aws_cli(ast_info)
 
     # Make object that contains mapping func_name to lambda_func_arn
-    map_func_to_func_arn(whole_info)
+    map_func_to_func_arn(ast_info)
 
     # Making VM Hybrid
-    write_hybrid_code(whole_info)
+    write_hybrid_code(ast_info)
 
     # Write hybrid code to output directory
-    save_hybrid_code_in_output_directory(whole_info)
+    save_hybrid_code_in_output_directory(ast_info)
 
     # Upload Hybrid to S3
-    upload_hybrid_code_to_s3(whole_info)
+    upload_hybrid_code_to_s3(ast_info)
 
     logger.info("End of Compiler")
 
