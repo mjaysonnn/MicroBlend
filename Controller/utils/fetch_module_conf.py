@@ -28,6 +28,6 @@ class ModuleConfiguration:
         conf_dict = load_config()
         self.server_config = conf_dict.get("Server")
         self.experiment_info = conf_dict.get("ExperimentInfo")
-        self.external_lb_config = conf_dict.get("External-LoadBalancer")
+        self.external_lb_config = conf_dict.get("External-LoadBalancer", None)
 
         self.nginx_basic_status_url: str = "basic_status"

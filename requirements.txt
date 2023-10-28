@@ -1,0 +1,10 @@
+astor~=0.8.1
+boto3~=1.28.73
+zlib~=1.2.13
+colorlog~=6.7.0
+requests~=2.31.0
+aiohttp~=3.8.5
+numpy~=1.26.0
+pytz~=2023.3.post1
+botocore~=1.31.73
+beautifulsoup4~=4.12.2
