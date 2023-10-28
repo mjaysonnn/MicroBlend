@@ -74,6 +74,7 @@ from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 
 # Assume the compiler code is in current directory
+from compiler import process
 
 sys.path.append("utils")
 from fetch_logging_configuration import init_logger, empty_log_file
@@ -1477,20 +1478,10 @@ def scale_up_resources(num_of_excess_server):
         t.join()
 
     # Case 2 Use Lambda when provisioning (MicroBlend)
-    """
-    This is the point where the compiler will generate hybrid code and coordinator code 
-    that triggers the Lambda-based microservice. This code is then distributed across servers
-    via AWS S3. During autoscaling, Loadcat will direct requests to the coordinator-code 
-    which interacts with Lambda-based microservices.
-    """
-
     if provisioning_method == "microblend":
         t = threading.Thread(
             target=launch_ec2_and_add_to_loadbalancer, args=[num_of_excess_server]
         )
-        #  add another thread for running compiler to generate hybrid code
-        # compiler.process_compiler(original_code, source_file_name) # use compiler in Compiler Folder
-
 
         # Use lambda after launching instances
         t.start()
