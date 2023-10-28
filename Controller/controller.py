@@ -1485,16 +1485,20 @@ def scale_up_resources(num_of_excess_server):
         via AWS S3. During autoscaling, Loadcat will direct requests to the coordinator-code 
         which interacts with Lambda-based microservices.
         """
-        t = threading.Thread(
-            target=launch_ec2_and_add_to_loadbalancer, args=[num_of_excess_server]
-        )
-
-        # Use lambda after launching instances
-        t.start()
+        # Start a thread to launch EC2 and add to load balancer
+        ec2_thread = threading.Thread(target=launch_ec2_and_add_to_loadbalancer, args=[num_of_excess_server])
+        ec2_thread.start()
+    
+        # Start the compiler thread and wait for it to finish
+        # compiler_thread = threading.Thread(target=compiler.process_compiler, args=[original_code, source_file_name])
+        # compiler_thread.start()
+        # compiler_thread.join()  # Wait for the compiler thread to finish
+    
+        # Switch to using Lambda after launching the EC2 instances
         change_service_type_to_lambda()
-
-        # After launching ec2 and adding to loadbalancer, change back to using VM
-        t.join()
+    
+        # Once EC2 and load balancer tasks are complete, switch back to using VMs
+        ec2_thread.join()
         change_service_type_to_vm()
 
     logger.debug(
