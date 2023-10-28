@@ -74,7 +74,11 @@ from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 
 # Assume the compiler code is in current directory
-from compiler import process
+# Add the parent directory to the sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Now, you can import the module from the parent directory
+from Compiler import compiler
 
 sys.path.append("utils")
 from fetch_logging_configuration import init_logger, empty_log_file
@@ -137,9 +141,21 @@ initial_or_recent_instances = []
 # Dictionary to keep track of terminated instance information
 terminated_instance_info = defaultdict(InstanceInfoClass)
 
+source_file_name: str = "../Workload/SocialNetwork/app/media_service.py"
+logger.info(f"File is {source_file_name}")
+
+# open source file name
+with open(source_file_name, "r") as original_code:
+    function_candidates = compiler.extract_and_print_function(original_code, source_file_name)
+
+logger.info(f"Function candidates: {function_candidates}")
+exit()
+
 # Load balancer information
-lb_addr = conf_dict.external_lb_config.get("external-loadbalancer-addr")
-lb_port = conf_dict.external_lb_config.get("external-loadbalancer-port")
+lb_addr = conf_dict.external_lb_config.get("external-loadbalancer-addr",
+                                           None)  # Fetch your own external load balancer address
+lb_port = conf_dict.external_lb_config.get("external-loadbalancer-port",
+                                           None)  # Fetch your own external load balancer address
 
 # Info about requests
 duration_info = {

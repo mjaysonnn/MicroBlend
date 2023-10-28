@@ -394,7 +394,7 @@ def extract_user_annotations(whole_info_class: WholeASTInfoClass):
     Let users choose which functions they want to annotate
     """
 
-    logger.info("Find pragma")
+    # logger.info("Find pragma")
 
     # Get the module for analysis
     analyzed_module = whole_info_class.copied_module_for_analysis
@@ -411,7 +411,7 @@ def extract_user_annotations(whole_info_class: WholeASTInfoClass):
                 ast_object=child_node,
                 line_number=child_node.lineno)
             function_def = find_pragma_in_function(child_node, function_def)
-            logger.debug(f"function_def is {function_def}")
+            # logger.debug(f"function_def is {function_def}")
 
             # Store function's information
             func_information[child_node.name] = function_def
@@ -2833,12 +2833,10 @@ def make_lambda_code_directory(whole_ast_info: WholeASTInfoClass) -> None:
     lambda_info_dict = whole_ast_info.lambda_function_info
     _handle_lambda_information(lambda_code_path, lambda_info_dict)
 
-    lambda_handler_module_dict: Dict[str, ast.Module] = whole_ast_info.lambda_handler_module_dict
-
-    if not lambda_handler_module_dict:
+    if lambda_handler_module_dict := whole_ast_info.lambda_handler_module_dict:
+        _handle_lambda_handler_modules(lambda_code_path, lambda_handler_module_dict)
+    else:
         return
-
-    _handle_lambda_handler_modules(lambda_code_path, lambda_handler_module_dict)
 
 
 def _initialize_lambda_directory(lambda_code_path: str) -> None:
@@ -3015,7 +3013,7 @@ def bring_module_list_in_import_modules_folder():
     """
     Bring module list in import_modules folder
     """
-    import_modules_dir = "../Workload/MediaReservation"
+    import_modules_dir = "../Workload/SocialNetwork"
     module_lists = next(os.walk(os.path.join(os.getcwd(), import_modules_dir)))[1]
     return import_modules_dir, module_lists
 
@@ -3653,6 +3651,28 @@ def group_functions_by_lambda_group(ast_info: WholeASTInfoClass):
         logger.info("\tNo lambda groups found.")
 
 
+def extract_and_print_function(original_code, f_name):
+    """
+    Process the compiler on the original code
+    :param original_code: The original code to be processed
+    :param f_name: The name used for creating dataclass
+    """
+
+    # Create dataclass to store whole info
+    ast_info = generate_original_and_copied_ast_info(original_code, f_name)
+
+    # Copy module for analysis
+    analyzed_ast_module: ast.Module = ast_info.copied_module_for_analysis
+
+    # Find user annotations in the code
+    extract_user_annotations(ast_info)
+
+    function_candidates = []
+    for each_func_info in ast_info.function_information.values():
+        function_candidates.append(each_func_info.func_name)
+    return function_candidates
+
+
 def process_compiler(original_code, f_name):
     """
     Process the compiler on the original code
@@ -3668,6 +3688,10 @@ def process_compiler(original_code, f_name):
 
     # Find user annotations in the code
     extract_user_annotations(ast_info)
+
+    logger.info("Function Information")
+    for each_func_info in ast_info.function_information.values():
+        logger.info(each_func_info.func_name)
 
     # Sort and group functions by lambda group name
     group_functions_by_lambda_group(ast_info)
